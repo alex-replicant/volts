@@ -3,6 +3,15 @@
 COMPONENTS="prepare vp report database media sipp opensips"
 REGISTRY="ihorolkhovskyi"
 
+# Determine if we're building with podman or docker.
+# Podman stores locally built images under the "localhost/" namespace and
+# enforces short-name resolution, so local images must be fully qualified.
+if docker --version 2>/dev/null | grep -qi "podman"; then
+    IMAGE_PREFIX="localhost/"
+else
+    IMAGE_PREFIX=""
+fi
+
 usage() {
     echo "Usage: $0 [-c|--clean] [-r|--refresh [component,...]] [-p|--push]"
     echo ""
@@ -20,6 +29,14 @@ REBUILD_COMPONENTS=""
 CLEAN=0
 PUSH=0
 
+is_valid_component() {
+    comp="$1"
+    for c in $COMPONENTS; do
+        [ "$c" = "$comp" ] && return 0
+    done
+    return 1
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         -c|--clean)
@@ -31,6 +48,13 @@ while [ $# -gt 0 ]; do
             if [ -n "$1" ] && [ "${1#-}" = "$1" ]; then
                 REBUILD_COMPONENTS=$(echo "$1" | tr ',' ' ')
                 shift
+                for comp in $REBUILD_COMPONENTS; do
+                    if ! is_valid_component "$comp"; then
+                        echo "Unknown component: $comp"
+                        echo "Valid components are: $COMPONENTS"
+                        exit 1
+                    fi
+                done
             else
                 REBUILD_COMPONENTS="$COMPONENTS"
             fi
@@ -52,9 +76,9 @@ done
 if [ "$CLEAN" = "1" ]; then
     echo "Cleaning VOLTS containers and images..."
     for comp in $COMPONENTS; do
-        docker ps -q --filter "ancestor=volts_$comp" | xargs -r docker stop
-        docker ps -aq --filter "ancestor=volts_$comp" | xargs -r docker rm
-        docker image rm "volts_$comp:latest" >> /dev/null 2>&1
+        docker ps -q --filter "ancestor=${IMAGE_PREFIX}volts_$comp" | xargs -r docker stop
+        docker ps -aq --filter "ancestor=${IMAGE_PREFIX}volts_$comp" | xargs -r docker rm
+        docker image rm "${IMAGE_PREFIX}volts_$comp:latest" >> /dev/null 2>&1
     done
     exit 0
 fi
@@ -69,7 +93,7 @@ should_rebuild() {
 }
 
 for comp in $COMPONENTS; do
-    tag="volts_$comp"
+    tag="${IMAGE_PREFIX}volts_$comp"
     cache_opt=""
 
     if should_rebuild "$comp"; then
@@ -83,7 +107,7 @@ done
 if [ "$PUSH" = "1" ]; then
     for comp in $COMPONENTS; do
         remote_tag="$REGISTRY/$comp"
-        docker tag "volts_$comp" "$remote_tag"
+        docker tag "${IMAGE_PREFIX}volts_$comp" "$remote_tag"
         docker push "$remote_tag"
     done
 fi

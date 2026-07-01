@@ -85,7 +85,7 @@ def perform_db_operations(db_options, db_actions, log_level=1, logger=None):
             return f"Cannot connect to database due to database module {db_options.get('type')} is not available"
         db_cursor = db_conn.cursor()
     except Exception as e:
-        error_msg = f"Database connection failed: {e}"
+        error_msg = f"Database {db_options.get('host')} connection failed: {e}"
         if logger:
             logger.error(error_msg)
         return error_msg

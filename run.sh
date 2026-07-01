@@ -231,7 +231,7 @@ cleanup_opensips_cache() {
 check_images() {
     missing=""
     for comp in $COMPONENTS; do
-        if ! docker image inspect "volts_$comp:latest" > /dev/null 2>&1; then
+        if ! docker image inspect "${IMAGE_PREFIX}volts_$comp:latest" > /dev/null 2>&1; then
             missing="$missing $comp"
         fi
     done
@@ -245,7 +245,7 @@ check_images() {
     for comp in $missing; do
         echo -n "  Pulling $comp... "
         if docker pull "$REGISTRY/$comp" > /dev/null 2>&1; then
-            docker tag "$REGISTRY/$comp" "volts_$comp:latest"
+            docker tag "$REGISTRY/$comp" "${IMAGE_PREFIX}volts_$comp:latest"
             echo "OK"
         else
             failed="$failed $comp"
@@ -300,7 +300,8 @@ VOLTS (Voip Open Linear Tester Suite) - VoIP Functional Testing Framework
 Usage: $0 [OPTIONS] [SCENARIO]
 
 SCENARIO:
-    <scenario_name>...  Run one or more scenarios (e.g., 001-register 002-call-echo)
+    <scenario_name>...  Run one or more scenarios, space- and/or comma-separated
+                        (e.g., 001-register 002-call-echo or 001-register,002-call-echo)
     tag=<tags>          Run scenarios with specific tags (e.g., tag=set1,set2)
     stop                Stop tests and delete all containers
     sngrep              Launch SIP packet capture tool
@@ -323,7 +324,8 @@ OPTIONS:
 EXAMPLES:
     $0                          Run all scenarios
     $0 001-register             Run specific scenario
-    $0 001-register 002-call-echo  Run multiple scenarios
+    $0 001-register 002-call-echo  Run multiple scenarios (space-separated)
+    $0 001-register,002-call-echo  Run multiple scenarios (comma-separated)
     $0 scenarios/001-register.xml  Run specific scenario with full path
     $0 tag=sipp,media           Run scenarios tagged as sipp or media
     $0 -l 3 001-register        Run scenario with debug logging
@@ -445,8 +447,15 @@ parse_arguments() {
                 exit 1
                 ;;
             *)
-                # Regular scenario name - allow multiple
-                SCENARIOS+=("$1")
+                # Regular scenario name - allow multiple, space- and/or
+                # comma-separated (e.g. "a b", "a,b,c" or "a, b, c").
+                IFS=',' read -ra SCENARIO_PARTS <<< "$1"
+                for part in "${SCENARIO_PARTS[@]}"; do
+                    # Trim surrounding whitespace and skip empty pieces
+                    part="${part#"${part%%[![:space:]]*}"}"
+                    part="${part%"${part##*[![:space:]]}"}"
+                    [[ -n "$part" ]] && SCENARIOS+=("$part")
+                done
                 shift
                 ;;
         esac
@@ -461,10 +470,17 @@ clean_tmp() {
 # Script controlled variables
 DIR_PREFIX=`pwd`
 SCENARIOS=()
+REGISTRY="gitlab-registry.cern.ch/cernphone/functional-testing"
 COMPONENTS="prepare vp report database media sipp opensips"
 
-# Determin if we're running script using podman
-VOLUME_SUFFIX=`docker --version 2>/dev/null | grep -qi "podman" && echo ":z" || echo ""`
+# Determine if we're running script using podman or docker.
+if docker --version 2>/dev/null | grep -qi "podman"; then
+    VOLUME_SUFFIX=":z"
+    IMAGE_PREFIX="localhost/"
+else
+    VOLUME_SUFFIX=""
+    IMAGE_PREFIX=""
+fi
 
 # Parse command line arguments
 parse_arguments "$@"
@@ -473,39 +489,39 @@ mkdir -p tmp/input
 mkdir -p tmp/output
 
 # prepare
-P_IMAGE=volts_prepare:latest
+P_IMAGE=${IMAGE_PREFIX}volts_prepare:latest
 P_CONTAINER_NAME=volts_prepare
 
 # database
-D_IMAGE=volts_database:latest
+D_IMAGE=${IMAGE_PREFIX}volts_database:latest
 D_CONTAINER_NAME=volts_database
 D_RESULT_FILE="database.jsonl"
 
 # voip_patrol
-VP_IMAGE=volts_vp:latest
+VP_IMAGE=${IMAGE_PREFIX}volts_vp:latest
 VP_CONTAINER_NAME=volts_vp
-#VP_IMAGE=voip_patrol_local:latest
+#VP_IMAGE=${IMAGE_PREFIX}voip_patrol_local:latest
 #VP_CONTAINER_NAME=voip_patrol_local
 VP_PORT=5060
 VP_RESULT_FILE="voip_patrol.jsonl"
 LOG_LEVEL_FILE=${LOG_LEVEL}
 
 # media
-M_IMAGE=volts_media:latest
+M_IMAGE=${IMAGE_PREFIX}volts_media:latest
 M_CONTAINER_NAME=volts_media
 M_RESULT_FILE="media_check.jsonl"
 
 # sipp
 SIPP_CONTAINER_NAME=volts_sipp
-SIPP_IMAGE=volts_sipp:latest
+SIPP_IMAGE=${IMAGE_PREFIX}volts_sipp:latest
 SIPP_RESULT_FILE="sipp.jsonl"
 
 # opensips
 PROXY_CONTAINER_NAME=volts_opensips
-PROXY_IMAGE=volts_opensips:latest
+PROXY_IMAGE=${IMAGE_PREFIX}volts_opensips:latest
 
 # report
-R_IMAGE=volts_report:latest
+R_IMAGE=${IMAGE_PREFIX}volts_report:latest
 R_CONTAINER_NAME=volts_report
 
 # Handle special commands first

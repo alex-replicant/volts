@@ -87,6 +87,12 @@ def build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report
 
     for test_entity in vp_report_data:
 
+        # voip_patrol container exit-code marker (emitted by entrypoint.vp.sh).
+        # Handled in a dedicated pass below, skip here so the single-key line is
+        # not mistaken for a test entity.
+        if "vp_exit" in test_entity:
+            continue
+
         # Voip Patrol scenario process start
         # We got start or end of test
         if test_entity.get("scenario"):
@@ -211,6 +217,26 @@ def build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report
             test_results[current_test]["status_text"] = "End time missing"
 
         test_results[current_test]["vp_status"] = test_results[current_test]["status"]
+
+    # Fail scenarios whose voip_patrol process exited non-zero (crash, bad
+    # config, forced stop, ...) even if the JSONL result looked complete. This
+    # runs after vp_status is set so the process exit code has the final say.
+    for test_entity in vp_report_data:
+        exit_info = test_entity.get("vp_exit")
+        if not exit_info:
+            continue
+
+        exit_code = exit_info.get("code")
+        if exit_code == 0:
+            continue
+
+        exit_test = _normalize_test_name(exit_info.get("name", "orphaned"))
+        if exit_test not in test_results:
+            test_results[exit_test] = {}
+
+        test_results[exit_test]["status"] = "FAIL"
+        test_results[exit_test]["vp_status"] = "FAIL"
+        test_results[exit_test]["status_text"] = f"voip_patrol exited with code {exit_code}"
 
     # Add results for SIPP scenarios
     for test_entity in sipp_report_data:
@@ -427,7 +453,7 @@ def print_results_json_full(test_results):
 
     if failed_scenarios is not None:
         print_failed_scenarios_details(failed_scenarios, test_results)
-        print(f"Scenarios {failed_scenarios} are failed!")
+        print(f"Scenarios {", ".join(failed_scenarios)} are failed!")
 
         return
 
@@ -441,7 +467,7 @@ def print_results_table_default(test_results):
     if failed_scenarios is not None:
         print_failed_scenarios_details(failed_scenarios, test_results)
         print_table(printed_results)
-        print(f"Scenarios {failed_scenarios} are failed!")
+        print(f"Scenarios {", ".join(failed_scenarios)} are failed!")
 
         return
 
@@ -456,7 +482,7 @@ def print_results_json_default(test_results):
         # print(json.dumps(printed_results, sort_keys=True, indent=4))
         custom_json_dump(printed_results, indent=4)
 
-        print(f"Scenarios {failed_scenarios} are failed!")
+        print(f"Scenarios {", ".join(failed_scenarios)} are failed!")
         print_failed_scenarios_details(failed_scenarios, test_results)
 
         return
@@ -473,7 +499,7 @@ def print_results_table_full(test_results):
     print_table(test_results)
 
     if failed_scenarios is not None:
-        print(f"Scenarios {failed_scenarios} are failed!")
+        print(f"Scenarios {", ".join(failed_scenarios)} are failed!")
 
         return
 
