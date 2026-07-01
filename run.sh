@@ -470,7 +470,6 @@ clean_tmp() {
 # Script controlled variables
 DIR_PREFIX=`pwd`
 SCENARIOS=()
-REGISTRY="gitlab-registry.cern.ch/cernphone/functional-testing"
 COMPONENTS="prepare vp report database media sipp opensips"
 
 # Determine if we're running script using podman or docker.
