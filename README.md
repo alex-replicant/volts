@@ -72,9 +72,6 @@ In a case if `voip_patrol` or `sipp` is updated, you need to rebuild these conta
 # Rebuild specific components
 ./build.sh --refresh vp,report
 
-# Custom scripts: rebuild prepare, report, and scripter together
-./build.sh -s -r prepare,report,scripter
-
 # Clean up all containers and images
 ./build.sh --clean
 
@@ -294,17 +291,19 @@ sipp <target> -sf <scenario.xml> -m 1 -mp <random_port> -i <container_ip>
 
 #### Custom scripts
 
-Optional component. Build with `./build.sh -s` (when adopting scripts, rebuild together: `./build.sh -s -r prepare,report,scripter`). Drop `.sh` / `.py` files into `build/src/scripter/scripts/`, add pip deps to `build/src/scripter/requirements.txt`, and declare them in a `<section type="script">`. Full developer guide: [`build/src/scripter/scripts/README.md`](build/src/scripter/scripts/README.md).
+Optional component. Build once with `./build.sh -s`. Your `.sh` / `.py` files live in the repo-root [`scripts/`](scripts/) folder, which is **mounted read-only** into the container on every run — adding or editing a script needs no rebuild. Shipped samples are inert `*.sample` files; activate with `cp scripts/ping_host.sh.sample scripts/ping_host.sh`. User scripts are gitignored, so `git pull` / `docker pull` never touch them. The image is batteries-included (`curl`, `jq`, `ping`, `dig`, python `requests`, plus the `volts_results` / `volts-result` result-query helpers); extra pip deps go into an optional local `scripts/requirements.txt` (see the guide — requires a local `./build.sh -r scripter`, and a mismatch between that file and the image fails the stage loudly). Full developer guide: [`scripts/README.md`](scripts/README.md).
 
 | Attribute | Default | Description |
 | --- | --- | --- |
-| `script` | (required) | Basename of a `.sh` / `.py` file baked into the scripter image |
+| `script` | (required) | Basename of a `.sh` / `.py` file in the mounted `scripts/` folder |
 | `stage` | `pre` | `pre` (before voip_patrol) or `post` (after media, so all JSONLs exist) |
 | `continue_on_error` | `false` | Keep running later actions in this stage on failure |
 | `timeout` | `60` | Seconds before the script process tree is killed |
 | `label` | script name | Human-readable name in logs and report error text |
 
 Params are `<param name="" value=""/>` children (or text content for multi-line values), exported as UPPERCASE env vars inside the container. They travel via the mounted `script.xml` (not `docker --env` CLI) so special characters round-trip; they still appear in the container process environment — never print params or `VOLTS_PARAMS_JSON`. Exit `0` = PASS, non-zero = FAIL (stderr/stdout tail becomes `s_error`). `pre` and `post` are independent — there is no database-style cleanup inversion. A failed `pre` script fails the scenario in the report, but `run.sh` still continues into voip/sipp/media/`post`.
+
+`post` scripts can query earlier results (e.g. SIP Call-IDs) via the baked-in helpers: `volts-result vp --get callid` in bash or `from volts_results import vp_tests` in python. A label matching several call legs (`call_count > 1`) returns all of them — use `--first`/`--last` to pick one.
 
 ```xml
 <config>
@@ -332,8 +331,6 @@ Params are `<param name="" value=""/>` children (or text content for multi-line 
     </section>
 </config>
 ```
-
-Note: if a scenario declares `<section type="script">` but the prepare image is outdated (no `script.capable` marker / no `script.xml`), `run.sh` fails that scenario loudly and asks you to rebuild.
 
 #### Database
 Database config is also done in XML, section `database`. We have 2 `stage`s of database scripts.

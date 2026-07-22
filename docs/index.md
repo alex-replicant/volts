@@ -74,8 +74,6 @@ Script will build 7 `docker` images by default (8 with `-s` / `--with-scripts`).
 # Build including the optional scripter image
 ./build.sh -s
 
-# Rebuild prepare, report, and scripter together when adopting scripts
-./build.sh -s -r prepare,report,scripter
 ```
 {: .code}
 
@@ -317,18 +315,18 @@ sipp <target> -sf <scenario.xml> -m 1 -mp <random_port> -i <container_ip>
 ### Custom Scripts
 {: #custom-scripts .title.title--mini}
 
-Optional component for running bash or python checks before/after a scenario. Build with `./build.sh -s` (when adopting scripts: `./build.sh -s -r prepare,report,scripter`). Put script sources in `build/src/scripter/scripts/`, shared pip deps in `build/src/scripter/requirements.txt`. Full developer guide: [`build/src/scripter/scripts/README.md`](https://github.com/igorolhovskiy/volts/blob/main/build/src/scripter/scripts/README.md).
+Optional component for running bash or python checks before/after a scenario. Build once with `./build.sh -s`. Script sources live in the repo-root `scripts/` folder, mounted read-only into the container on every run — adding or editing a script needs no rebuild. Shipped samples are inert `*.sample` files (activate with `cp scripts/ping_host.sh.sample scripts/ping_host.sh`); user scripts are gitignored so `git pull` / `docker pull` never touch them. The image ships `curl`, `jq`, `ping`, `dig`, python `requests` and the `volts_results` / `volts-result` result-query helpers (`post` scripts can read e.g. SIP Call-IDs: `volts-result vp --get callid`; a label matching several call legs returns all of them, `--first`/`--last` pick one); extra pip deps go into an optional local `scripts/requirements.txt` (local `./build.sh -r scripter` required, drift fails the stage loudly). Full developer guide: [`scripts/README.md`](https://github.com/igorolhovskiy/volts/blob/main/scripts/README.md).
 
 | Attribute | Default | Description |
 |-----------|---------|-------------|
-| `script` | (required) | Basename of a `.sh` / `.py` file in the scripter image |
+| `script` | (required) | Basename of a `.sh` / `.py` file in the mounted `scripts/` folder |
 | `stage` | `pre` | `pre` (before voip_patrol) or `post` (after media) |
 | `continue_on_error` | `false` | Keep running later actions in this stage on failure |
 | `timeout` | `60` | Seconds before the script process tree is killed |
 | `label` | script name | Human-readable name in logs and report error text |
 {: .table}
 
-Params are `<param name="" value=""/>` children (or text content for multi-line values), exported as UPPERCASE env vars inside the container via the mounted `script.xml` (not `docker --env` CLI). Never print params — failure tails land in the report. Exit `0` = PASS; non-zero = FAIL (`s_error` from stderr/stdout). Multiple `<section type="script">` blocks are merged. A failed `pre` script fails the scenario in the report, but the suite still continues into voip/sipp/media/`post`. If prepare is outdated (no `script.capable` / no `script.xml`), `run.sh` fails loudly and asks you to rebuild.
+Params are `<param name="" value=""/>` children (or text content for multi-line values), exported as UPPERCASE env vars inside the container via the mounted `script.xml` (not `docker --env` CLI). Never print params — failure tails land in the report. Exit `0` = PASS; non-zero = FAIL (`s_error` from stderr/stdout). Multiple `<section type="script">` blocks are merged. A failed `pre` script fails the scenario in the report, but the suite still continues into voip/sipp/media/`post`.
 
 **Example:**
 

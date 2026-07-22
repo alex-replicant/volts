@@ -1,3 +1,0 @@
-# Shared pip requirements for ALL python scripts in scripts/ (and the runner).
-# Add your script's dependencies below and rebuild: ./build.sh -r scripter
-requests==2.32.4

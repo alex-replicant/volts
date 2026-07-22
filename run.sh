@@ -162,8 +162,7 @@ run_report() {
 
 script_fail_line() {
     # Standard-channel failure when the container could not run at all.
-    # SCRIPT_HOST_FAIL also forces a non-zero suite exit even if the report
-    # image is outdated and ignores script.jsonl entirely.
+    # SCRIPT_HOST_FAIL forces a non-zero suite exit for these host-side errors.
     SCRIPT_HOST_FAIL=1
     echo "{\"scenario\": \"${CURRENT_SCENARIO}\", \"stage\": \"${1}\", \"error\": \"${2}\", \"status\": \"FAIL\"}" \
         >> ${DIR_PREFIX}/tmp/output/${SCRIPT_RESULT_FILE}
@@ -182,6 +181,14 @@ run_script() {
         return
     fi
 
+    # Scripts are mounted from ./scripts, not baked into the image. Guard here
+    # so docker does not silently auto-create a root-owned empty directory
+    if [ ! -d "${DIR_PREFIX}/scripts" ]; then
+        echo "[ERROR] ${CURRENT_SCENARIO}: scripts directory missing at ${DIR_PREFIX}/scripts"
+        script_fail_line "${1}" "scripts directory missing at ./scripts"
+        return
+    fi
+
     docker run --name=${S_CONTAINER_NAME} \
         --env SCENARIO=`echo ${CURRENT_SCENARIO}` \
         --env STAGE=`echo ${1}` \
@@ -196,6 +203,7 @@ run_script() {
         --env TEST_END_TIME="`echo ${TEST_END_TIME}`" \
         --volume ${DIR_PREFIX}/tmp/input/${CURRENT_SCENARIO}/script.xml:/xml/${CURRENT_SCENARIO}.xml${VOLUME_SUFFIX} \
         --volume ${DIR_PREFIX}/tmp/output:/output${VOLUME_SUFFIX} \
+        --volume "${DIR_PREFIX}/scripts:/scripts${SCRIPTS_VOLUME_SUFFIX}" \
         --rm \
         --platform linux/amd64 \
         ${S_IMAGE}
@@ -203,23 +211,6 @@ run_script() {
     # Runner guarantees a JSONL line itself; this catches docker-level failures
     if [ $? -ne 0 ]; then
         script_fail_line "${1}" "scripter container failed to run"
-    fi
-}
-
-# Stale-prepare guard: new prepare always leaves script.capable. If that marker
-# is present, trust prepare (Jinja may have stripped the section). Fail only when
-# source mentions <section type="script">, no script.xml, and prepare is outdated.
-check_script_prepared() {
-    if [ -f "${DIR_PREFIX}/tmp/input/${CURRENT_SCENARIO}/script.xml" ]; then
-        return
-    fi
-    if [ -f "${DIR_PREFIX}/tmp/input/script.capable" ]; then
-        return
-    fi
-    if grep -Eq '<section[[:space:]]+type[[:space:]]*=[[:space:]]*["'"'"']script["'"'"']' \
-            "${DIR_PREFIX}/scenarios/${CURRENT_SCENARIO}.xml" 2>/dev/null; then
-        echo "[ERROR] ${CURRENT_SCENARIO}: <section type=\"script\"> found but prepare produced no script.xml - rebuild: ./build.sh -s -r prepare,report,scripter"
-        script_fail_line "pre" "script section not prepared - prepare image is outdated, rebuild with ./build.sh -s -r prepare,report,scripter"
     fi
 }
 
@@ -347,7 +338,6 @@ delete_containers() {
 run_scenario() {
     TEST_START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
     TEST_END_TIME=""
-    check_script_prepared
     run_database pre
     run_script pre
     run_voip_patrol
@@ -543,11 +533,15 @@ SCENARIOS=()
 COMPONENTS="prepare vp report database media sipp opensips"
 
 # Determine if we're running script using podman or docker.
+# SCRIPTS_VOLUME_SUFFIX is separate: the read-only scripts mount needs
+# comma-joined options under podman (":ro,z" - appending ":z" after ":ro" is invalid)
 if docker --version 2>/dev/null | grep -qi "podman"; then
     VOLUME_SUFFIX=":z"
+    SCRIPTS_VOLUME_SUFFIX=":ro,z"
     IMAGE_PREFIX="localhost/"
 else
     VOLUME_SUFFIX=""
+    SCRIPTS_VOLUME_SUFFIX=":ro"
     IMAGE_PREFIX=""
 fi
 

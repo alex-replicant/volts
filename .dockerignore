@@ -1,0 +1,11 @@
+# Root build context is used ONLY by Dockerfile.scripter (see build.sh).
+# Allowlist style: user scripts in scripts/ must NEVER reach the docker
+# daemon or image layers - only the optional requirements.txt goes in.
+*
+!build/
+!build/**
+# legacy location of user scripts (pre-mount design) - keep them out too
+build/src/scripter/scripts
+build/src/scripter/scripts/**
+!scripts/
+!scripts/requirements.txt

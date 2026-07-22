@@ -1,2 +1,8 @@
 tmp/input/*
 tmp/output/*
+# User scripts for the optional scripter component are local-only;
+# samples (*.sample) and the guide stay tracked.
+scripts/*
+!scripts/README.md
+!scripts/*.sample
+__pycache__/

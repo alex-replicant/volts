@@ -1,0 +1,3 @@
+#!/bin/sh
+# CLI wrapper for bash scripts; python scripts import volts_results directly.
+exec python3 /root/helpers/volts_results.py "$@"

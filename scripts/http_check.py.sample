@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Params: URL (required), EXPECTED_STATUS (default 200), API_KEY (optional).
+API_KEY demonstrates complex-value passing: it arrives byte-for-byte,
+no shell escaping needed. Exit 0 = PASS, non-zero = FAIL.
+
+Standard vars: SCENARIO, STAGE, TEST_START_TIME, TEST_END_TIME, VP_RESULT_FILE.
+In the post stage, /output/$VP_RESULT_FILE (voip_patrol.jsonl) already exists,
+so real-time data like SIP Call-IDs can be read via the baked-in volts_results
+helper (a test label can match several legs when call_count > 1 - you get all).
+
+IMPORTANT: never print params or VOLTS_PARAMS_JSON - on failure, stderr/stdout
+ends up in script.jsonl and the final report (secret leak)."""
+import os
+import sys
+
+import requests
+from volts_results import vp_tests
+
+SCENARIO = os.environ["SCENARIO"]
+STAGE = os.environ["STAGE"]
+
+call_ids = [t["callid"] for t in vp_tests() if t.get("callid")]
+print(
+    f"[{SCENARIO}][{STAGE}] test window "
+    f"'{os.environ.get('TEST_START_TIME')}' -> '{os.environ.get('TEST_END_TIME')}', "
+    f"call-ids: {call_ids}"
+)
+
+if STAGE == "post" and not call_ids:
+    print(f"[{SCENARIO}][{STAGE}] no call-ids found in voip_patrol results", file=sys.stderr)
+    sys.exit(1)
+
+url = os.environ["URL"]
+expected = int(os.environ.get("EXPECTED_STATUS", "200"))
+headers = {}
+if os.environ.get("API_KEY"):
+    headers["Authorization"] = f"Bearer {os.environ['API_KEY']}"
+
+params = {
+    "call_id": call_ids,
+    "from": os.environ.get("TEST_START_TIME"),
+    "to": os.environ.get("TEST_END_TIME"),
+}
+
+resp = requests.get(url, headers=headers, params=params, timeout=10)
+if resp.status_code != expected:
+    print(
+        f"[{SCENARIO}][{STAGE}] {url} returned {resp.status_code}, expected {expected}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+print(f"{url} -> {resp.status_code} OK")

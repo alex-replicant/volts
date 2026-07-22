@@ -120,13 +120,41 @@ for comp in $COMPONENTS; do
         cache_opt="--no-cache"
     fi
 
-    docker build $cache_opt --file "build/Dockerfile.$comp" --platform linux/amd64 --tag "$tag" build/
+    # scripter builds from the repo root so the optional scripts/requirements.txt
+    # is reachable; the root .dockerignore keeps user scripts out of the context
+    ctx="build/"
+    [ "$comp" = "scripter" ] && ctx="."
+
+    docker build $cache_opt --file "build/Dockerfile.$comp" --platform linux/amd64 --tag "$tag" "$ctx"
 done
 
 if [ "$PUSH" = "1" ]; then
+    PUSH_FAILED=0
     for comp in $COMPONENTS; do
+        # A scripter image built with a local scripts/requirements.txt is
+        # customized and must never land on the shared registry tag.
+        # Probe exit codes: 0 = digest baked (refuse), 1 = clean stock image,
+        # anything else = docker-level error (fail closed, do not push)
+        if [ "$comp" = "scripter" ]; then
+            docker run --rm --entrypoint test "${IMAGE_PREFIX}volts_scripter:latest" \
+                -f /root/requirements.baked.sha256 2>/dev/null
+            probe=$?
+            if [ $probe -eq 0 ]; then
+                echo "Refusing to push scripter: image was built with a local scripts/requirements.txt"
+                echo "Remove scripts/requirements.txt, rebuild (./build.sh -r scripter) and push again"
+                PUSH_FAILED=1
+                continue
+            elif [ $probe -ne 1 ]; then
+                echo "Refusing to push scripter: could not inspect the image (docker error, rc=$probe)"
+                PUSH_FAILED=1
+                continue
+            fi
+        fi
         remote_tag="$REGISTRY/$comp"
         docker tag "${IMAGE_PREFIX}volts_$comp" "$remote_tag"
         docker push "$remote_tag"
     done
+    if [ "$PUSH_FAILED" = "1" ]; then
+        exit 1
+    fi
 fi

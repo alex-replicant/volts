@@ -1,21 +1,40 @@
 FROM python:3.13-slim-bookworm
 
-COPY src/scripter/requirements.txt /root/requirements.txt
+# NOTE: unlike every other component, this image is built with the REPO ROOT
+# as context (see build.sh) so the optional scripts/requirements.txt escape
+# hatch can be read. The root .dockerignore allowlists only build/ and
+# scripts/requirements.txt - user scripts are mounted at runtime, never baked.
 
 RUN mkdir -p /xml /output /scripts && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         bash \
         ca-certificates \
-        iputils-ping && \
-    pip install --no-cache-dir -r /root/requirements.txt && \
+        curl \
+        dnsutils \
+        iputils-ping \
+        jq && \
+    pip install --no-cache-dir requests==2.32.4 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-COPY src/scripter/scripter.py /root/scripter.py
-COPY src/common /root/common
-COPY src/scripter/scripts /scripts
-COPY --chmod=755 entrypoint.scripter.sh /docker-entrypoint.sh
+# Optional escape hatch: thanks to .dockerignore, scripts/ in the context
+# contains at most requirements.txt. Bake extra deps plus a canonicalized
+# digest so the runtime drift check can prove image/host consistency.
+COPY scripts/ /tmp/build-scripts/
+RUN if [ -f /tmp/build-scripts/requirements.txt ]; then \
+        pip install --no-cache-dir -r /tmp/build-scripts/requirements.txt && \
+        sed -e 's/\r$//' -e 's/[[:space:]]*$//' /tmp/build-scripts/requirements.txt \
+            | grep -v '^[[:space:]]*\(#\|$\)' | sha256sum | cut -d' ' -f1 \
+            > /root/requirements.baked.sha256; \
+    fi && rm -rf /tmp/build-scripts
 
-VOLUME ["/xml", "/output"]
+COPY build/src/scripter/scripter.py /root/scripter.py
+COPY build/src/scripter/requirements_drift.py /root/requirements_drift.py
+COPY build/src/scripter/volts_results.py /root/helpers/volts_results.py
+COPY build/src/common /root/common
+COPY --chmod=755 build/src/scripter/volts-result /usr/local/bin/volts-result
+COPY --chmod=755 build/entrypoint.scripter.sh /docker-entrypoint.sh
+
+VOLUME ["/xml", "/output", "/scripts"]
 WORKDIR /root
 ENTRYPOINT ["/docker-entrypoint.sh"]

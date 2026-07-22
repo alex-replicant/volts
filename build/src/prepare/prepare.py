@@ -362,7 +362,7 @@ try:
 
     logger.info("Starting preparing template(s)...")
 
-    for marker in ("scenarios.done", "websocket.need", "script.capable"):
+    for marker in ("scenarios.done", "websocket.need"):
         try:
             os.remove(f"/opt/output/{marker}")
         except (FileNotFoundError, OSError):
@@ -425,8 +425,6 @@ try:
             process_scenario(filename, combined_config, log_level, tags)
 
     pathlib.Path('/opt/output/scenarios.done').touch(mode=0o777)
-    # Marker that this prepare image understands <section type="script">
-    pathlib.Path('/opt/output/script.capable').touch(mode=0o777)
     if websocket_proxy_needed:
         pathlib.Path('/opt/output/websocket.need').touch(mode=0o777)
 

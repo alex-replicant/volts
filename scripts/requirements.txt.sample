@@ -1,0 +1,17 @@
+# OPTIONAL escape hatch for python scripts that need packages beyond the
+# curated set baked into the published volts_scripter image (requests).
+#
+# To use it:
+#   1. cp scripts/requirements.txt.sample scripts/requirements.txt
+#   2. add your pinned dependencies below
+#   3. rebuild the image locally: ./build.sh -r scripter
+#
+# The build bakes a digest of this file into the image; at runtime the scripter
+# compares it against the mounted scripts/requirements.txt and FAILS the script
+# stage if they differ OR if this file exists but the image was built without
+# it (a forgotten rebuild can't half-work silently).
+# scripts/requirements.txt is gitignored - it is your local, per-host choice.
+# Images built with a local requirements.txt are refused by ./build.sh -p.
+#
+# example:
+# dnspython==2.7.0
