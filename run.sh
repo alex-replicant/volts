@@ -189,7 +189,10 @@ run_script() {
         return
     fi
 
+    # Host network (same as vp/opensips): scripts often need outbound HTTPS
+    # and bridge egress is unreliable on some lab hosts.
     docker run --name=${S_CONTAINER_NAME} \
+        --net=host \
         --env SCENARIO=`echo ${CURRENT_SCENARIO}` \
         --env STAGE=`echo ${1}` \
         --env RESULT_FILE=`echo ${SCRIPT_RESULT_FILE}` \

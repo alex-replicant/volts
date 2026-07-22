@@ -3,7 +3,8 @@
 Scripts in this directory are **mounted read-only** into the optional
 `volts_scripter` container at `/scripts` on every run — they are NOT baked
 into the image. Add or edit a `.sh` / `.py` file here and just re-run
-`./run.sh`; no rebuild needed.
+`./run.sh`; no rebuild needed. The scripter container uses `--net=host`
+(same as voip_patrol / opensips) so scripts can reach outbound HTTPS APIs.
 
 ```sh
 # activate a shipped sample (samples are inert until copied):
