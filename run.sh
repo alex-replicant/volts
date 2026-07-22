@@ -189,6 +189,20 @@ run_script() {
         return
     fi
 
+    if ! S_IMAGE_ID=$(docker image inspect -f '{{.Id}}' "${S_IMAGE}" 2>/dev/null) \
+       || [ -z "${S_IMAGE_ID}" ]; then
+        echo "[ERROR] ${CURRENT_SCENARIO}: cannot inspect ${S_IMAGE}"
+        script_fail_line "${1}" "cannot inspect scripter image"
+        return
+    fi
+
+    # Host-persisted pip --target cache (sibling of scripts/, not under wiped tmp/)
+    if ! mkdir -p "${DIR_PREFIX}/tmp/scripter-deps"; then
+        echo "[ERROR] ${CURRENT_SCENARIO}: cannot create tmp/scripter-deps"
+        script_fail_line "${1}" "cannot create tmp/scripter-deps"
+        return
+    fi
+
     # Host network (same as vp/opensips): scripts often need outbound HTTPS
     # and bridge egress is unreliable on some lab hosts.
     docker run --name=${S_CONTAINER_NAME} \
@@ -204,9 +218,11 @@ run_script() {
         --env TZ=`echo ${TIMEZONE}` \
         --env TEST_START_TIME="`echo ${TEST_START_TIME}`" \
         --env TEST_END_TIME="`echo ${TEST_END_TIME}`" \
+        --env VOLTS_SCRIPTER_IMAGE_ID="${S_IMAGE_ID}" \
         --volume ${DIR_PREFIX}/tmp/input/${CURRENT_SCENARIO}/script.xml:/xml/${CURRENT_SCENARIO}.xml${VOLUME_SUFFIX} \
         --volume ${DIR_PREFIX}/tmp/output:/output${VOLUME_SUFFIX} \
         --volume "${DIR_PREFIX}/scripts:/scripts${SCRIPTS_VOLUME_SUFFIX}" \
+        --volume "${DIR_PREFIX}/tmp/scripter-deps:/deps${VOLUME_SUFFIX}" \
         --rm \
         --platform linux/amd64 \
         ${S_IMAGE}

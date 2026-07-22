@@ -1,11 +1,6 @@
 FROM python:3.13-slim-bookworm
 
-# NOTE: unlike every other component, this image is built with the REPO ROOT
-# as context (see build.sh) so the optional scripts/requirements.txt escape
-# hatch can be read. The root .dockerignore allowlists only build/ and
-# scripts/requirements.txt - user scripts are mounted at runtime, never baked.
-
-RUN mkdir -p /xml /output /scripts && \
+RUN mkdir -p /xml /output /scripts /deps && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
         bash \
@@ -17,24 +12,15 @@ RUN mkdir -p /xml /output /scripts && \
     pip install --no-cache-dir requests==2.32.4 && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Optional escape hatch: thanks to .dockerignore, scripts/ in the context
-# contains at most requirements.txt. Bake extra deps plus a canonicalized
-# digest so the runtime drift check can prove image/host consistency.
-COPY scripts/ /tmp/build-scripts/
-RUN if [ -f /tmp/build-scripts/requirements.txt ]; then \
-        pip install --no-cache-dir -r /tmp/build-scripts/requirements.txt && \
-        sed -e 's/\r$//' -e 's/[[:space:]]*$//' /tmp/build-scripts/requirements.txt \
-            | grep -v '^[[:space:]]*\(#\|$\)' | sha256sum | cut -d' ' -f1 \
-            > /root/requirements.baked.sha256; \
-    fi && rm -rf /tmp/build-scripts
+# Extras from scripts/requirements.txt install at runtime into the host-persisted
+# /deps mount (pip --target). Image stays stock and Hub-pushable.
 
-COPY build/src/scripter/scripter.py /root/scripter.py
-COPY build/src/scripter/requirements_drift.py /root/requirements_drift.py
-COPY build/src/scripter/volts_results.py /root/helpers/volts_results.py
-COPY build/src/common /root/common
-COPY --chmod=755 build/src/scripter/volts-result /usr/local/bin/volts-result
-COPY --chmod=755 build/entrypoint.scripter.sh /docker-entrypoint.sh
+COPY src/scripter/scripter.py /root/scripter.py
+COPY src/scripter/volts_results.py /root/helpers/volts_results.py
+COPY src/common /root/common
+COPY --chmod=755 src/scripter/volts-result /usr/local/bin/volts-result
+COPY --chmod=755 entrypoint.scripter.sh /docker-entrypoint.sh
 
-VOLUME ["/xml", "/output", "/scripts"]
+VOLUME ["/xml", "/output", "/scripts", "/deps"]
 WORKDIR /root
 ENTRYPOINT ["/docker-entrypoint.sh"]

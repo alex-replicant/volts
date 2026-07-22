@@ -1,5 +1,6 @@
 tmp/input/*
 tmp/output/*
+tmp/scripter-deps/
 # User scripts for the optional scripter component are local-only;
 # samples (*.sample) and the guide stay tracked.
 scripts/*

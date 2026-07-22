@@ -155,7 +155,9 @@ def get_script_config(sections):
     for config in sections:
         if len(config) == 0 or config[0].tag != 'actions':
             raise Exception('<script> section: first child must be <actions>')
-        for elem in config[0]:
+        # Snapshot children before append: lxml append() reparents (moves) the
+        # element, and mutating the source tree mid-iteration can skip nodes.
+        for elem in list(config[0]):
             if elem.tag != 'action':
                 raise Exception(f"<script> section: unexpected element <{elem.tag}>")
             script = elem.attrib.get('script', '')

@@ -27,17 +27,17 @@ The published image is static and batteries-included:
 - **result helpers**: the `volts_results` python module and the
   `volts-result` CLI (see below)
 
-### Extra python deps (escape hatch, local rebuild)
+### Extra python deps (runtime install, no rebuild)
 
 Need more than `requests`? Copy [`requirements.txt.sample`](requirements.txt.sample)
-to `scripts/requirements.txt`, add pinned deps, rebuild locally:
-`./build.sh -r scripter`. The build bakes a digest of the file; at runtime the
-scripter compares it against the mounted copy and **fails the script stage**
-if they differ (forgotten rebuild) or if the file exists but the image was
-built without it (a stock image with a mounted requirements.txt also fails -
-the image provably lacks your deps). If the image has baked extras and the
-file was deleted, you only get a warning. `./build.sh -s -p` refuses to push
-such a customized image.
+to `scripts/requirements.txt` and add **pinned** deps (flat file only — no
+`-r` / `-c` / editable / local paths). On the next run the scripter installs
+them with `pip install --target` into a host cache at `tmp/scripter-deps/`
+(mounted rw at `/deps`; script sources stay `:ro`). A digest + image id marker
+skips pip on later runs. First run (or after editing requirements / rebuilding
+the scripter image) needs outbound network to PyPI. Wipe the cache with
+`rm -rf tmp/scripter-deps` (`./build.sh -c` does **not** remove it). A failed
+install fails the script stage loudly and skips actions.
 
 ## Scenario config
 

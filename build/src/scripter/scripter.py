@@ -1,8 +1,11 @@
 # Runner for custom bash/python scripts declared in <section type="script">.
 # Mirrors database.py: one JSONL line per STAGE with status derived from error.
 
+import hashlib
 import json
 import os
+import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -13,12 +16,17 @@ from pathlib import Path
 sys.path.insert(0, '/root/common')
 from logger import setup_logger, get_log_level, ErrorReporter
 from script_params import PARAM_NAME_RE, is_reserved_param
-import requirements_drift
 
 INTERPRETERS = {'.py': 'python3', '.sh': 'bash'}
 TAIL_CHARS = 500
 HELPERS_DIR = '/root/helpers'
-REBUILD_HINT = 'rebuild: ./build.sh -r scripter'
+DEPS_DIR = Path('/deps')
+DEPS_PKGS = DEPS_DIR / 'pkgs'
+DEPS_STAGING = DEPS_DIR / '.pkgs-new'
+DEPS_MARKER = DEPS_DIR / '.marker'
+REQ_PATH = Path('/scripts/requirements.txt')
+CACHE_SCHEMA = 1
+_BLANK_OR_COMMENT_RE = re.compile(r'^\s*(#|$)')
 
 
 def read_tail(temp_file, n=TAIL_CHARS):
@@ -39,40 +47,104 @@ def write_report(filename, report):
         f.write(json.dumps(report) + "\n")
 
 
-def check_requirements(report, logger):
-    '''Requirements drift check. Returns False if the whole stage must fail
-    (no actions run): the mounted scripts/requirements.txt and the deps baked
-    into the image must match, otherwise python scripts would misbehave in
-    confusing ways - fail loudly and ask for a local rebuild instead.'''
-    baked, mounted = None, None
-    baked_path = Path(requirements_drift.BAKED_DIGEST_FILE)
-    mounted_path = Path(requirements_drift.MOUNTED_REQUIREMENTS)
-    if baked_path.is_file():
-        baked = baked_path.read_text().strip()
-    if mounted_path.is_file():
-        mounted = requirements_drift.canonical_digest(
-            mounted_path.read_text(errors='replace')
-        )
+def req_body_lines(text):
+    '''Non-empty, non-comment requirement lines (same filter as canonical_digest).'''
+    lines = []
+    for line in text.splitlines():
+        line = line.rstrip()
+        if _BLANK_OR_COMMENT_RE.match(line):
+            continue
+        lines.append(line)
+    return lines
 
-    verdict = requirements_drift.drift_verdict(mounted, baked)
-    if verdict == requirements_drift.FAIL_MOUNTED_ONLY:
+
+def canonical_digest(text):
+    '''SHA-256 over canonicalized requirements text.'''
+    lines = [line + '\n' for line in req_body_lines(text)]
+    return hashlib.sha256(''.join(lines).encode()).hexdigest()
+
+
+def _marker_key(req_digest, image_id):
+    return {
+        'schema': CACHE_SCHEMA,
+        'requirements_sha256': req_digest,
+        'python': sys.version.split()[0],
+        'image_id': image_id,
+    }
+
+
+def ensure_deps(report, logger):
+    '''Install extras into /deps/pkgs on cache miss.
+
+    Returns PYTHONPATH string, or None if the stage must FAIL (no actions).
+    '''
+    image_id = os.environ.get('VOLTS_SCRIPTER_IMAGE_ID', '').strip()
+    if not image_id:
         report['error'] += (
-            f"[SCRIPT][REQUIREMENTS DRIFT]: scripts/requirements.txt present but "
-            f"the image was built without it - {REBUILD_HINT} "
+            '[SCRIPT][DEPS INSTALL]: VOLTS_SCRIPTER_IMAGE_ID missing '
+            '(run via ./run.sh) '
         )
-        return False
-    if verdict == requirements_drift.FAIL_DIFFER:
+        return None
+
+    if not REQ_PATH.is_file():
+        return HELPERS_DIR
+
+    text = REQ_PATH.read_text(errors='replace')
+    if not req_body_lines(text):
+        # empty / comment-only: stock path; do NOT expose stale pkgs
+        return HELPERS_DIR
+
+    digest = canonical_digest(text)
+    want = _marker_key(digest, image_id)
+
+    if DEPS_MARKER.is_file() and DEPS_PKGS.is_dir():
+        try:
+            have = json.loads(DEPS_MARKER.read_text())
+        except (json.JSONDecodeError, OSError):
+            have = None
+        if have == want:
+            logger.info('scripter deps cache hit')
+            return f'{DEPS_PKGS}:{HELPERS_DIR}'
+
+    logger.info('scripter deps cache miss — pip install --target')
+    # Invalidate marker first so a crash cannot leave a false hit
+    DEPS_MARKER.unlink(missing_ok=True)
+    if DEPS_STAGING.exists():
+        shutil.rmtree(DEPS_STAGING)
+    DEPS_STAGING.mkdir(parents=True)
+
+    proc = subprocess.run(
+        [
+            sys.executable, '-m', 'pip', 'install',
+            '--disable-pip-version-check', '--no-input',
+            '--timeout', '120', '--no-cache-dir',
+            '-r', str(REQ_PATH),
+            '--target', str(DEPS_STAGING),
+        ],
+        capture_output=True, text=True, errors='replace',
+    )
+    if proc.returncode != 0:
+        shutil.rmtree(DEPS_STAGING, ignore_errors=True)
+        tail = (proc.stderr or proc.stdout or '')[-TAIL_CHARS:]
         report['error'] += (
-            f"[SCRIPT][REQUIREMENTS DRIFT]: scripts/requirements.txt changed since "
-            f"the image was built - {REBUILD_HINT} "
+            f'[SCRIPT][DEPS INSTALL]: pip failed rc={proc.returncode}: {tail} '
         )
-        return False
-    if verdict == requirements_drift.WARN_BAKED_ONLY:
-        logger.warning(
-            f"image contains extra baked deps from a previous scripts/requirements.txt "
-            f"that no longer exists; for a clean image, {REBUILD_HINT}"
-        )
-    return True
+        return None
+
+    if DEPS_PKGS.exists():
+        shutil.rmtree(DEPS_PKGS)
+    DEPS_STAGING.rename(DEPS_PKGS)
+
+    tmp = DEPS_DIR / '.marker.tmp'
+    tmp.write_text(json.dumps(want, sort_keys=True) + '\n')
+    tmp.replace(DEPS_MARKER)
+
+    subprocess.run(
+        ['chmod', '-R', 'a+rwX', str(DEPS_DIR)],
+        check=False,
+    )
+
+    return f'{DEPS_PKGS}:{HELPERS_DIR}'
 
 
 def stage_actions(actions_root, stage):
@@ -84,7 +156,7 @@ def stage_actions(actions_root, stage):
     ]
 
 
-def run_action(action, report, scenario_stage, logger):
+def run_action(action, report, scenario_stage, logger, pythonpath):
     '''Returns False if the remaining actions must be skipped (continue_on_error=false).'''
     script_ref = action.attrib.get('script', '')
     display = action.attrib.get('label') or script_ref
@@ -122,12 +194,8 @@ def run_action(action, report, scenario_stage, logger):
     env = os.environ.copy()
     env.update(params)
     env['VOLTS_PARAMS_JSON'] = json.dumps(params)
-    # Baked helpers (volts_results) importable from user python scripts;
-    # PYTHONPATH is on the param denylist so params can never override this
-    existing_pythonpath = env.get('PYTHONPATH')
-    env['PYTHONPATH'] = (
-        f"{HELPERS_DIR}:{existing_pythonpath}" if existing_pythonpath else HELPERS_DIR
-    )
+    # PYTHONPATH is on the param denylist; ensure_deps owns the exact string
+    env['PYTHONPATH'] = pythonpath
 
     with tempfile.TemporaryFile(mode='w+', errors='replace') as f_out, \
          tempfile.TemporaryFile(mode='w+', errors='replace') as f_err:
@@ -175,11 +243,13 @@ def main():
         if not actions:
             # Nothing declared for this stage - stay silent, no JSONL line
             write_line = False
-        # On a failed requirements check no actions run; finally still writes the FAIL line
-        elif check_requirements(report, logger):
-            for action in actions:
-                if not run_action(action, report, scenario_stage, logger):
-                    break
+        else:
+            # On ensure_deps failure no actions run; finally still writes the FAIL line
+            pythonpath = ensure_deps(report, logger)
+            if pythonpath is not None:
+                for action in actions:
+                    if not run_action(action, report, scenario_stage, logger, pythonpath):
+                        break
     except Exception as e:
         report['error'] += f"[SCRIPT][RUNNER ERROR]: {e} "
         error_reporter.add_error(f"scripter runner error: {e}", e)
