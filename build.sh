@@ -1,6 +1,7 @@
 #!/bin/sh
 
 COMPONENTS="prepare vp report database media sipp opensips"
+OPTIONAL_COMPONENTS="scripter"
 REGISTRY="ihorolkhovskyi"
 
 # Determine if we're building with podman or docker.
@@ -13,25 +14,28 @@ else
 fi
 
 usage() {
-    echo "Usage: $0 [-c|--clean] [-r|--refresh [component,...]] [-p|--push]"
+    echo "Usage: $0 [-c|--clean] [-r|--refresh [component,...]] [-s|--with-scripts] [-p|--push]"
     echo ""
     echo "Options:"
     echo "  -c, --clean                   Stop/remove all VOLTS containers and images"
     echo "  -r, --refresh                 Force rebuild all components (--no-cache)"
     echo "  -r, --refresh comp1[,comp2,...]  Force rebuild specific component(s) (--no-cache)"
+    echo "  -s, --with-scripts            Include the optional scripter component"
     echo "  -p, --push                    Tag and push images to $REGISTRY"
     echo ""
-    echo "Components: $COMPONENTS"
+    echo "Components: $COMPONENTS $OPTIONAL_COMPONENTS"
     exit 1
 }
 
 REBUILD_COMPONENTS=""
 CLEAN=0
 PUSH=0
+WITH_SCRIPTS=0
+REFRESH_ALL=0
 
 is_valid_component() {
     comp="$1"
-    for c in $COMPONENTS; do
+    for c in $COMPONENTS $OPTIONAL_COMPONENTS; do
         [ "$c" = "$comp" ] && return 0
     done
     return 1
@@ -43,6 +47,10 @@ while [ $# -gt 0 ]; do
             CLEAN=1
             shift
             ;;
+        -s|--with-scripts)
+            WITH_SCRIPTS=1
+            shift
+            ;;
         -r|--refresh)
             shift
             if [ -n "$1" ] && [ "${1#-}" = "$1" ]; then
@@ -51,12 +59,12 @@ while [ $# -gt 0 ]; do
                 for comp in $REBUILD_COMPONENTS; do
                     if ! is_valid_component "$comp"; then
                         echo "Unknown component: $comp"
-                        echo "Valid components are: $COMPONENTS"
+                        echo "Valid components are: $COMPONENTS $OPTIONAL_COMPONENTS"
                         exit 1
                     fi
                 done
             else
-                REBUILD_COMPONENTS="$COMPONENTS"
+                REFRESH_ALL=1
             fi
             ;;
         -p|--push)
@@ -73,9 +81,20 @@ while [ $# -gt 0 ]; do
     esac
 done
 
+# Order-independent: finalize COMPONENTS after parsing so -s / -r work in any order
+if [ "$WITH_SCRIPTS" = "1" ]; then
+    COMPONENTS="$COMPONENTS scripter"
+elif echo " $REBUILD_COMPONENTS " | grep -q " scripter "; then
+    COMPONENTS="$COMPONENTS scripter"
+fi
+if [ "$REFRESH_ALL" = "1" ]; then
+    REBUILD_COMPONENTS="$COMPONENTS"
+fi
+
 if [ "$CLEAN" = "1" ]; then
     echo "Cleaning VOLTS containers and images..."
-    for comp in $COMPONENTS; do
+    # Always include optional images (e.g. scripter) even when -s was not passed
+    for comp in $COMPONENTS $OPTIONAL_COMPONENTS; do
         docker ps -q --filter "ancestor=${IMAGE_PREFIX}volts_$comp" | xargs -r docker stop
         docker ps -aq --filter "ancestor=${IMAGE_PREFIX}volts_$comp" | xargs -r docker rm
         docker image rm "${IMAGE_PREFIX}volts_$comp:latest" >> /dev/null 2>&1

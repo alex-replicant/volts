@@ -149,6 +149,7 @@ run_report() {
         --env D_RESULT_FILE=`echo ${D_RESULT_FILE}` \
         --env M_RESULT_FILE=`echo ${M_RESULT_FILE}` \
         --env SIPP_RESULT_FILE=`echo ${SIPP_RESULT_FILE}` \
+        --env SCRIPT_RESULT_FILE=`echo ${SCRIPT_RESULT_FILE}` \
         --env REPORT_TYPE=`echo ${REPORT_TYPE}` \
         --env TZ=`echo ${TIMEZONE}` \
         --volume ${DIR_PREFIX}/tmp/input:/opt/scenarios/${VOLUME_SUFFIX} \
@@ -157,6 +158,69 @@ run_report() {
         --rm \
         --platform linux/amd64 \
         ${R_IMAGE}
+}
+
+script_fail_line() {
+    # Standard-channel failure when the container could not run at all.
+    # SCRIPT_HOST_FAIL also forces a non-zero suite exit even if the report
+    # image is outdated and ignores script.jsonl entirely.
+    SCRIPT_HOST_FAIL=1
+    echo "{\"scenario\": \"${CURRENT_SCENARIO}\", \"stage\": \"${1}\", \"error\": \"${2}\", \"status\": \"FAIL\"}" \
+        >> ${DIR_PREFIX}/tmp/output/${SCRIPT_RESULT_FILE}
+}
+
+run_script() {
+    if [ ! -f "${DIR_PREFIX}/tmp/input/${CURRENT_SCENARIO}/script.xml" ]; then
+        return
+    fi
+
+    # Scenario declares scripts but optional image is absent: report via the
+    # standard JSONL channel AND stdout instead of silently skipping
+    if ! docker image inspect "${S_IMAGE}" > /dev/null 2>&1; then
+        echo "[ERROR] ${CURRENT_SCENARIO}: script section present but scripter image missing, build with ./build.sh -s"
+        script_fail_line "${1}" "scripter image missing, build with ./build.sh -s"
+        return
+    fi
+
+    docker run --name=${S_CONTAINER_NAME} \
+        --env SCENARIO=`echo ${CURRENT_SCENARIO}` \
+        --env STAGE=`echo ${1}` \
+        --env RESULT_FILE=`echo ${SCRIPT_RESULT_FILE}` \
+        --env VP_RESULT_FILE=`echo ${VP_RESULT_FILE}` \
+        --env D_RESULT_FILE=`echo ${D_RESULT_FILE}` \
+        --env M_RESULT_FILE=`echo ${M_RESULT_FILE}` \
+        --env SIPP_RESULT_FILE=`echo ${SIPP_RESULT_FILE}` \
+        --env LOG_LEVEL=`echo ${LOG_LEVEL}` \
+        --env TZ=`echo ${TIMEZONE}` \
+        --env TEST_START_TIME="`echo ${TEST_START_TIME}`" \
+        --env TEST_END_TIME="`echo ${TEST_END_TIME}`" \
+        --volume ${DIR_PREFIX}/tmp/input/${CURRENT_SCENARIO}/script.xml:/xml/${CURRENT_SCENARIO}.xml${VOLUME_SUFFIX} \
+        --volume ${DIR_PREFIX}/tmp/output:/output${VOLUME_SUFFIX} \
+        --rm \
+        --platform linux/amd64 \
+        ${S_IMAGE}
+
+    # Runner guarantees a JSONL line itself; this catches docker-level failures
+    if [ $? -ne 0 ]; then
+        script_fail_line "${1}" "scripter container failed to run"
+    fi
+}
+
+# Stale-prepare guard: new prepare always leaves script.capable. If that marker
+# is present, trust prepare (Jinja may have stripped the section). Fail only when
+# source mentions <section type="script">, no script.xml, and prepare is outdated.
+check_script_prepared() {
+    if [ -f "${DIR_PREFIX}/tmp/input/${CURRENT_SCENARIO}/script.xml" ]; then
+        return
+    fi
+    if [ -f "${DIR_PREFIX}/tmp/input/script.capable" ]; then
+        return
+    fi
+    if grep -Eq '<section[[:space:]]+type[[:space:]]*=[[:space:]]*["'"'"']script["'"'"']' \
+            "${DIR_PREFIX}/scenarios/${CURRENT_SCENARIO}.xml" 2>/dev/null; then
+        echo "[ERROR] ${CURRENT_SCENARIO}: <section type=\"script\"> found but prepare produced no script.xml - rebuild: ./build.sh -s -r prepare,report,scripter"
+        script_fail_line "pre" "script section not prepared - prepare image is outdated, rebuild with ./build.sh -s -r prepare,report,scripter"
+    fi
 }
 
 run_database() {
@@ -264,6 +328,7 @@ delete_containers() {
     docker stop ${M_CONTAINER_NAME} >> /dev/null 2>&1
     docker stop ${SIPP_CONTAINER_NAME} >> /dev/null 2>&1
     docker stop ${D_CONTAINER_NAME} >> /dev/null 2>&1
+    docker stop ${S_CONTAINER_NAME} >> /dev/null 2>&1
     docker stop ${R_CONTAINER_NAME} >> /dev/null 2>&1
     docker stop ${P_CONTAINER_NAME} >> /dev/null 2>&1
     docker stop ${VP_CONTAINER_NAME} >> /dev/null 2>&1
@@ -272,6 +337,7 @@ delete_containers() {
     docker rm ${M_CONTAINER_NAME} >> /dev/null 2>&1
     docker rm ${SIPP_CONTAINER_NAME} >> /dev/null 2>&1
     docker rm ${D_CONTAINER_NAME} >> /dev/null 2>&1
+    docker rm ${S_CONTAINER_NAME} >> /dev/null 2>&1
     docker rm ${R_CONTAINER_NAME} >> /dev/null 2>&1
     docker rm ${P_CONTAINER_NAME} >> /dev/null 2>&1
     docker rm ${VP_CONTAINER_NAME} >> /dev/null 2>&1
@@ -280,12 +346,16 @@ delete_containers() {
 
 run_scenario() {
     TEST_START_TIME=$(date '+%Y-%m-%d %H:%M:%S')
+    TEST_END_TIME=""
+    check_script_prepared
     run_database pre
+    run_script pre
     run_voip_patrol
     run_sipp
     TEST_END_TIME=$(date '+%Y-%m-%d %H:%M:%S')
     run_database post
     run_media
+    run_script post
     if [ -f ${DIR_PREFIX}/tmp/input/websocket.need ]; then
         cleanup_opensips_cache
     fi
@@ -515,6 +585,12 @@ SIPP_CONTAINER_NAME=volts_sipp
 SIPP_IMAGE=${IMAGE_PREFIX}volts_sipp:latest
 SIPP_RESULT_FILE="sipp.jsonl"
 
+# scripter (optional component — not in COMPONENTS / check_images)
+S_IMAGE=${IMAGE_PREFIX}volts_scripter:latest
+S_CONTAINER_NAME=volts_scripter
+SCRIPT_RESULT_FILE="script.jsonl"
+SCRIPT_HOST_FAIL=0
+
 # opensips
 PROXY_CONTAINER_NAME=volts_opensips
 PROXY_IMAGE=${IMAGE_PREFIX}volts_opensips:latest
@@ -640,5 +716,10 @@ HMS_TOTAL_RUN=$(printf '%02d:%02d:%02d' \
     $(( (TIME_TOTAL_RUN % 3600) / 60 )) \
     $(( TIME_TOTAL_RUN % 60 )))
 echo "Total time taken: ${HMS_TOTAL_RUN}"
+
+if [ "${SCRIPT_HOST_FAIL}" -ne 0 ]; then
+    echo "[ERROR] one or more scenarios had script infrastructure failures (see script.jsonl)"
+    exit 1
+fi
 
 exit ${VOLTS_EXIT}

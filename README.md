@@ -18,25 +18,27 @@ It will make and receive calls and configure the database.</br>
 And to add, you can definitely use it in [TDD](https://en.wikipedia.org/wiki/Test-driven_development) approach when adding functionalities to your existing PBX system. Test-Fail-Fix.</br></br>
 
 
-The suite consists of 8 parts, that are running sequentially
-1. Preparation - at this part we're transforming templates to real scenarios of `voip_patrol`, `sipp`, `database` and `media_check` using [`Jinja2`](https://jinja.palletsprojects.com/en/3.0.x/) template engine with [`jinja2_time`](https://github.com/hackebrot/jinja2-time) extension to put some dynamic data based on time.
+The suite consists of 10 parts, that are running sequentially
+1. Preparation - at this part we're transforming templates to real scenarios of `voip_patrol`, `sipp`, `database`, `media_check` and `script` using [`Jinja2`](https://jinja.palletsprojects.com/en/3.0.x/) template engine with [`jinja2_time`](https://github.com/hackebrot/jinja2-time) extension to put some dynamic data based on time.
 2. Start of a `Websocket-TLS` proxy to provide possibility of use WSS transport for the `voip_patrol` scenarios.
 ---
 3. Running database scripts. Usually - put some data inside some routing or subscriber data.
-4. Running `voip_patrol` or `sipp` scenario.
-5. Again running database scripts. Usually - remove data that had been put at stage 3.
-6. Run `media_check` if necessary to analyse obtained media files
+4. Running custom scripts (`stage=pre`), if the optional scripter component is built and the scenario declares them.
+5. Running `voip_patrol` or `sipp` scenario.
+6. Again running database scripts. Usually - remove data that had been put at stage 3.
+7. Run `media_check` if necessary to analyse obtained media files.
+8. Running custom scripts (`stage=post`) last, so all JSONL result files are readable.
 ---
-7. Tearing down a `Websocket-TLS` proxy.
-8. Report - at this part we're analyzing the results of the previous steps reading and interpreting file obtained running steps 3-6. Printing results in the desired way. Table by default.
-Steps 3-6 are running sequentially against scenarios files prepared in step 1. One at a time. Again, it's for `Linear`
+9. Tearing down a `Websocket-TLS` proxy.
+10. Report - at this part we're analyzing the results of the previous steps reading and interpreting file obtained running steps 3-8. Printing results in the desired way. Table by default.
+Steps 3-8 are running sequentially against scenarios files prepared in step 1. One at a time. Again, it's for `Linear`
 
 ## Building
 
 You can build images locally or pull existing from a `dockerhub`.</br>
 Suite is designed to run locally from your Linux PC or Mac. And of course, `docker` should be installed. It's up to you.</br>
 *Notes on using `podman`: I was able to run VOTLS using `podman-docker` package. One obstacle by default - the volumes permissions inside a container. To address this issue please refer to [this article](https://www.redhat.com/en/blog/container-permission-denied-errors).*</br>
-To build, just run `./build.sh`. Script will build 7 `docker` images and tag em accordingly.</br>
+To build, just run `./build.sh`. Script will build 7 `docker` images by default (8 with `-s` / `--with-scripts`).</br>
 In a case if `voip_patrol` or `sipp` is updated, you need to rebuild these containers again, you can do it with `./build.sh -r <component>`, refer to `./build.sh --help`.
 
 ### Build Options
@@ -47,15 +49,19 @@ In a case if `voip_patrol` or `sipp` is updated, you need to rebuild these conta
 
 | Option | Description |
 | --- | --- |
-| `-c, --clean` | Stop and remove all VOLTS containers and images |
+| `-c, --clean` | Stop and remove all VOLTS containers and images (including optional scripter) |
 | `-r, --refresh` | Force rebuild all components (`--no-cache`) |
 | `-r, --refresh comp1[,comp2,...]` | Force rebuild specific component(s) (`--no-cache`) |
+| `-s, --with-scripts` | Include the optional scripter component |
 | `-p, --push` | Tag and push images to the registry. Change the `REGISTRY` variable in a script accordingly |
 
 #### Examples
 ```sh
 # Build all components
 ./build.sh
+
+# Build including the optional scripter image
+./build.sh -s
 
 # Force rebuild all components from scratch
 ./build.sh --refresh
@@ -65,6 +71,9 @@ In a case if `voip_patrol` or `sipp` is updated, you need to rebuild these conta
 
 # Rebuild specific components
 ./build.sh --refresh vp,report
+
+# Custom scripts: rebuild prepare, report, and scripter together
+./build.sh -s -r prepare,report,scripter
 
 # Clean up all containers and images
 ./build.sh --clean
@@ -282,6 +291,49 @@ sipp <target> -sf <scenario.xml> -m 1 -mp <random_port> -i <container_ip>
 | `max_concurrent_calls` | `-l` option in SIPP. Set the maximum number of simultaneous calls. 10 by default. |
 | `total_timeout` | How long to wait for a test to preform in seconds. 600 (10 minutes) by default |
 
+
+#### Custom scripts
+
+Optional component. Build with `./build.sh -s` (when adopting scripts, rebuild together: `./build.sh -s -r prepare,report,scripter`). Drop `.sh` / `.py` files into `build/src/scripter/scripts/`, add pip deps to `build/src/scripter/requirements.txt`, and declare them in a `<section type="script">`. Full developer guide: [`build/src/scripter/scripts/README.md`](build/src/scripter/scripts/README.md).
+
+| Attribute | Default | Description |
+| --- | --- | --- |
+| `script` | (required) | Basename of a `.sh` / `.py` file baked into the scripter image |
+| `stage` | `pre` | `pre` (before voip_patrol) or `post` (after media, so all JSONLs exist) |
+| `continue_on_error` | `false` | Keep running later actions in this stage on failure |
+| `timeout` | `60` | Seconds before the script process tree is killed |
+| `label` | script name | Human-readable name in logs and report error text |
+
+Params are `<param name="" value=""/>` children (or text content for multi-line values), exported as UPPERCASE env vars inside the container. They travel via the mounted `script.xml` (not `docker --env` CLI) so special characters round-trip; they still appear in the container process environment — never print params or `VOLTS_PARAMS_JSON`. Exit `0` = PASS, non-zero = FAIL (stderr/stdout tail becomes `s_error`). `pre` and `post` are independent — there is no database-style cleanup inversion. A failed `pre` script fails the scenario in the report, but `run.sh` still continues into voip/sipp/media/`post`.
+
+```xml
+<config>
+    <section type="script">
+        <actions>
+            <action script="ping_host.sh" label="SBC reachable before test" stage="pre">
+                <param name="host" value="{{ c.domain }}"/>
+            </action>
+        </actions>
+    </section>
+    <section type="voip_patrol">
+        <actions>
+            <!-- usual call/register actions -->
+        </actions>
+    </section>
+    <section type="script">
+        <actions>
+            <action script="http_check.py" label="CDR landed in billing API" stage="post"
+                    continue_on_error="true" timeout="30">
+                <param name="url" value="https://api.example.com/cdr/{{ scenario_name }}"/>
+                <param name="expected_status" value="200"/>
+                <param name="api_key" value="{{ c.api_key }}"/>
+            </action>
+        </actions>
+    </section>
+</config>
+```
+
+Note: if a scenario declares `<section type="script">` but the prepare image is outdated (no `script.capable` marker / no `script.xml`), `run.sh` fails that scenario loudly and asks you to rebuild.
 
 #### Database
 Database config is also done in XML, section `database`. We have 2 `stage`s of database scripts.
@@ -598,27 +650,29 @@ Additional variables for advanced users:
 
 ## Results
 
+Rebuilding the report image always adds a **Script** column (`N/A` when the scenario has no script section).
+
 As a result, you will have a table like this.
 ```
-+---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+------------------+
-|                              Scenario |                                               VoIP Patrol | SIPP | Database | Media | Status |             Text |
-+---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+------------------+
-|                           01-register |                                                      PASS |  N/A |      N/A |   N/A |   PASS |  Scenario passed |
-|                                       |                                      Register 88881       |      |          |       |   PASS | Main test passed |
-|                          02-call-echo |                                                      PASS |  N/A |      N/A |   N/A |   PASS |  Scenario passed |
-|                                       |                                      Call to 11111 (echo) |      |          |       |   PASS | Main test passed |
++---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+--------+------------------+
+|                              Scenario |                                               VoIP Patrol | SIPP | Database | Media | Script | Status |             Text |
++---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+--------+------------------+
+|                           01-register |                                                      PASS |  N/A |      N/A |   N/A |    N/A |   PASS |  Scenario passed |
+|                                       |                                      Register 88881       |      |          |       |        |   PASS | Main test passed |
+|                          02-call-echo |                                                      PASS |  N/A |      N/A |   N/A |    N/A |   PASS |  Scenario passed |
+|                                       |                                      Call to 11111 (echo) |      |          |       |        |   PASS | Main test passed |
 
 ....
-|            51-call-echo-media-control |                                                      PASS |  N/A |      N/A |  PASS |   PASS |  Scenario passed |
-|                                       |                                      Call to 11111 (echo) |      |          |       |   PASS | Main test passed |
-| 52-delayed-call-forward-unconditional |                                                      PASS |  N/A |     PASS |   N/A |   PASS |  Scenario passed |
-|                                       |                                      Register 90012       |      |          |       |   PASS | Main test passed |
-|                                       |                                      Register 90013       |      |          |       |   PASS | Main test passed |
-|                                       |                      Receive call on 90012 and not answer |      |          |       |   PASS |    Call canceled |
-|                                       |   Call from 90011 to 90012 (delay forward 25 sec) ->90013 |      |          |       |   PASS | Main test passed |
-|                                       |                       Receive call on 90013       finally |      |          |       |   PASS | Main test passed |
-|                53-server-check-health |                                                       N/A | PASS |      N/A |   N/A |   PASS | SIPP test passed |
-+---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+------------------+
+|            51-call-echo-media-control |                                                      PASS |  N/A |      N/A |  PASS |    N/A |   PASS |  Scenario passed |
+|                                       |                                      Call to 11111 (echo) |      |          |       |        |   PASS | Main test passed |
+| 52-delayed-call-forward-unconditional |                                                      PASS |  N/A |     PASS |   N/A |    N/A |   PASS |  Scenario passed |
+|                                       |                                      Register 90012       |      |          |       |        |   PASS | Main test passed |
+|                                       |                                      Register 90013       |      |          |       |        |   PASS | Main test passed |
+|                                       |                      Receive call on 90012 and not answer |      |          |       |        |   PASS |    Call canceled |
+|                                       |   Call from 90011 to 90012 (delay forward 25 sec) ->90013 |      |          |       |        |   PASS | Main test passed |
+|                                       |                       Receive call on 90013       finally |      |          |       |        |   PASS | Main test passed |
+|                53-server-check-health |                                                       N/A | PASS |      N/A |   N/A |    N/A |   PASS | SIPP test passed |
++---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+--------+------------------+
 
 Scenarios ['49-teams-follow-forward', '50-team-no-answer-forward'] are failed!
 ```

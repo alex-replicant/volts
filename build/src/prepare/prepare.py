@@ -11,6 +11,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 # Add common utilities to path
 sys.path.insert(0, '/root/common')
 from logger import setup_logger, get_log_level, ErrorReporter
+from script_params import PARAM_NAME_RE as SCRIPT_PARAM_RE, is_reserved_param
 
 # Main thing here - we're using jinja2_time.TimeExtension (https://github.com/hackebrot/jinja2-time)
 env = Environment(
@@ -79,6 +80,7 @@ def separate_scenario(scenario, combined_config, name='', log_level=0, tags=()):
         return None
 
     separate_scenarios = {}
+    script_sections = []
 
     for child in root:
 
@@ -98,6 +100,12 @@ def separate_scenario(scenario, combined_config, name='', log_level=0, tags=()):
 
         if child.attrib.get('type') == 'sipp':
             separate_scenarios['sipp'] = get_generic_config(child)
+
+        if child.attrib.get('type') == 'script':
+            script_sections.append(child)
+
+    if script_sections:
+        separate_scenarios['script'] = get_script_config(script_sections)
 
     return separate_scenarios
 
@@ -128,6 +136,72 @@ def write_scenarios(name, separate_scenarios):
     sipp_scenario_tree = separate_scenarios.get("sipp")
     if sipp_scenario_tree:
         sipp_scenario_tree.write(f"{scenario_dir_path}/sipp.xml")
+
+    script_scenario_tree = separate_scenarios.get("script")
+    if script_scenario_tree:
+        script_scenario_tree.write(f"{scenario_dir_path}/script.xml")
+
+
+ALLOWED_SCRIPT_ATTRS = {'script', 'stage', 'continue_on_error', 'timeout', 'label'}
+BOOL_LITERALS = {'true', 'false', 'on', 'off', '1', '0'}
+
+
+def get_script_config(sections):
+    '''Strictly validate script actions and merge all <section type="script">
+    blocks into a single <config><actions> tree, preserving document order.
+    Everything raises: a broken script section must fail preparation loudly.
+    '''
+    merged = ET.Element('actions', attrib=None, nsmap=None)
+    for config in sections:
+        if len(config) == 0 or config[0].tag != 'actions':
+            raise Exception('<script> section: first child must be <actions>')
+        for elem in config[0]:
+            if elem.tag != 'action':
+                raise Exception(f"<script> section: unexpected element <{elem.tag}>")
+            script = elem.attrib.get('script', '')
+            if not script or script != os.path.basename(script) or not script.endswith(('.py', '.sh')):
+                raise Exception(f"<script> action: <{script}> must be a plain .py/.sh basename")
+            if elem.attrib.get('stage', 'pre').lower() not in ('pre', 'post'):
+                raise Exception(f"<script> action {script}: stage must be pre or post")
+            if elem.attrib.get('continue_on_error', 'false').lower() not in BOOL_LITERALS:
+                raise Exception(
+                    f"<script> action {script}: continue_on_error must be one of {BOOL_LITERALS}"
+                )
+            if (not elem.attrib.get('timeout', '60').isdigit()
+                    or int(elem.attrib.get('timeout', '60')) <= 0):
+                raise Exception(f"<script> action {script}: timeout must be a positive integer")
+            for attr in elem.attrib:
+                if attr not in ALLOWED_SCRIPT_ATTRS:
+                    raise Exception(
+                        f"<script> action {script}: unknown attribute <{attr}> "
+                        f"(params go in <param> children)"
+                    )
+            seen = set()
+            for p in elem:
+                if p.tag != 'param':
+                    raise Exception(f"<script> action {script}: unexpected child <{p.tag}>")
+                for p_attr in p.attrib:
+                    if p_attr not in ('name', 'value'):
+                        raise Exception(
+                            f"<script> action {script}: <param> attribute <{p_attr}> not allowed"
+                        )
+                name = p.attrib.get('name', '')
+                if (not SCRIPT_PARAM_RE.match(name) or name.upper() in seen
+                        or is_reserved_param(name)):
+                    raise Exception(
+                        f"<script> param <{name}> is not a valid/unique/non-reserved env var name"
+                    )
+                if p.attrib.get('value') is not None and (p.text or '').strip():
+                    raise Exception(
+                        f"<script> param <{name}>: use value= OR text content, not both"
+                    )
+                seen.add(name.upper())
+            merged.append(elem)
+    if len(merged) == 0:
+        raise Exception('<script> section(s) have no actions')
+    root = ET.Element('config', attrib=None, nsmap=None)
+    root.append(merged)
+    return ET.ElementTree(root)
 
 
 def get_generic_config(config):
@@ -288,11 +362,11 @@ try:
 
     logger.info("Starting preparing template(s)...")
 
-    try:
-        os.remove("/opt/output/scenarios.done")
-        os.remove("/opt/output/websocket.need")
-    except (FileNotFoundError, OSError):
-        pass
+    for marker in ("scenarios.done", "websocket.need", "script.capable"):
+        try:
+            os.remove(f"/opt/output/{marker}")
+        except (FileNotFoundError, OSError):
+            pass
 
     with open(r"/opt/input/config.yaml") as config_file:
         filename = "config.yaml"
@@ -351,6 +425,8 @@ try:
             process_scenario(filename, combined_config, log_level, tags)
 
     pathlib.Path('/opt/output/scenarios.done').touch(mode=0o777)
+    # Marker that this prepare image understands <section type="script">
+    pathlib.Path('/opt/output/script.capable').touch(mode=0o777)
     if websocket_proxy_needed:
         pathlib.Path('/opt/output/websocket.need').touch(mode=0o777)
 

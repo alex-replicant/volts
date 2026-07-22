@@ -40,6 +40,8 @@ navigation:
         url: "#scenarios"
       - title: "Global Config"
         url: "#global-config"
+      - title: "Custom Scripts"
+        url: "#custom-scripts"
       - title: "Database"
         url: "#database"
       - title: "Media Check"

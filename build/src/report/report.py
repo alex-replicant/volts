@@ -56,10 +56,10 @@ def _normalize_test_name(name):
     return normalized_name
 
 
-def build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report_data):
+def build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report_data, s_report_data):
     """
-    Function to process line-by-line data from (*voip_patrol* OR *sipp*) AND OPTIONALLY *database* OR/AND *media* JSONL results file
-    to a dict with a structure
+    Function to process line-by-line data from (*voip_patrol* OR *sipp*) AND OPTIONALLY
+    *database* / *media* / *script* JSONL results files to a dict with a structure
     "scenario_name": {
         "status": ...
         "start_time": ...
@@ -79,6 +79,11 @@ def build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report
         "sipp_status":...
         "sipp_error": {
             ...
+        }
+        "s_status": ...
+        "s_error": {
+            "stage": ...
+            "text": ...
         }
     }
     """
@@ -327,6 +332,38 @@ def build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report
             test_results[current_test]["status"] = "FAIL"
             test_results[current_test]['status_text'] += " Media failed"
 
+    # Enrich results with script info (seeds missing scenarios so script-only
+    # and host-side fallback FAIL lines are never dropped by align)
+    for test_entity in s_report_data:
+        current_test = test_entity.get("scenario")
+        if not current_test:
+            continue
+
+        if current_test not in test_results:
+            test_results[current_test] = {
+                "status": test_entity.get("status", "FAIL"),
+                "status_text": "Script only scenario",
+            }
+
+        current_test_s_status = test_entity.get("status", "FAIL")
+        if current_test_s_status == "PASS" and test_results[current_test].get("s_status") == "PASS":
+            continue
+
+        if current_test_s_status != "PASS":
+            test_results[current_test]["s_status"] = "FAIL"
+            test_results[current_test]["status"] = "FAIL"
+            if "s_error" not in test_results[current_test]:
+                test_results[current_test]["s_error"] = {"stage": "", "text": ""}
+            test_results[current_test]["s_error"]["stage"] += f"{test_entity.get('stage', 'err')} "
+            test_results[current_test]["s_error"]["text"] += f"{test_entity.get('error', 'err')} "
+            test_results[current_test]['status_text'] = (
+                test_results[current_test].get('status_text', '') + " Script failed"
+            )
+            continue
+
+        if not test_results[current_test].get("s_status"):
+            test_results[current_test]["s_status"] = "PASS"
+
     # Sort test results
     sorted_test_results = {key: val for key, val in sorted(test_results.items(), key = lambda ele: ele[0])}
 
@@ -385,6 +422,10 @@ def filter_results_default(test_results):
             printed_results[scenario_name]["sipp_status"] = scenario_details.get("sipp_status")
             printed_results[scenario_name]["sipp_error"] = scenario_details.get("sipp_error", "")
 
+        if scenario_details.get("s_status", "PASS") != "PASS":
+            printed_results[scenario_name]["s_status"] = scenario_details.get("s_status")
+            printed_results[scenario_name]["s_error"] = scenario_details.get("s_error", "")
+
         errors.append(scenario_name)
 
         failed_tests = {}
@@ -407,24 +448,31 @@ def filter_results_default(test_results):
 def print_table(print_results):
     tbl = PrettyTable()
 
-    tbl.field_names = ["Scenario", "VoIP Patrol", "SIPP", "Database", "Media", "Status" ,"Text"]
+    tbl.field_names = ["Scenario", "VoIP Patrol", "SIPP", "Database", "Media", "Script", "Status", "Text"]
 
     for scenario_name, scenario_details in print_results.items():
         vp_status_text = scenario_details.get("vp_status", "N/A")
         db_status_text = scenario_details.get("d_status", "N/A")
         m_status_text = scenario_details.get("m_status", "N/A")
         sipp_status_text = scenario_details.get("sipp_status", "N/A")
+        s_status_text = scenario_details.get("s_status", "N/A")
 
         # Getting overall status:
         combined_status = scenario_details.get("status", "N/A")
 
-        tbl.add_row([scenario_name, vp_status_text, sipp_status_text, db_status_text, m_status_text, combined_status, scenario_details.get("status_text")])
+        tbl.add_row([
+            scenario_name, vp_status_text, sipp_status_text, db_status_text,
+            m_status_text, s_status_text, combined_status, scenario_details.get("status_text"),
+        ])
 
         if not (type(scenario_details.get("tests")) is dict):
             continue
 
         for test_data in scenario_details.get("tests").values():
-            tbl.add_row(["", test_data.get("label"), "", "", "", test_data.get("result"), test_data.get("result_text")])
+            tbl.add_row([
+                "", test_data.get("label"), "", "", "", "",
+                test_data.get("result"), test_data.get("result_text"),
+            ])
 
     tbl.align = "r"
     print(tbl)
@@ -443,6 +491,8 @@ def print_failed_scenarios_details(failed_scenarios, test_results):
             custom_json_dump(test_results[failed_scenario]['d_error'], indent=4)
         if test_results[failed_scenario].get('sipp_status') == 'FAIL':
             custom_json_dump(test_results[failed_scenario]['sipp_error'], indent=4)
+        if test_results[failed_scenario].get('s_status') == 'FAIL':
+            custom_json_dump(test_results[failed_scenario]['s_error'], indent=4)
 
 
 def print_results_json_full(test_results):
@@ -548,8 +598,20 @@ try:
             if process_error:
                 raise Exception(f"Error processing media report file: {process_error}")
 
+    s_report_file_name = os.environ.get("SCRIPT_RESULT_FILE", "script.jsonl")
+    s_report_file_path = r'/opt/report/' + s_report_file_name
+    s_report_data = []
+
+    if os.path.exists(s_report_file_path):
+        with open(s_report_file_path) as report_file:
+            process_error, s_report_data = process_jsonl_file(report_file)
+            if process_error:
+                raise Exception(f"Error processing script report file: {process_error}")
+
     tests_list = get_tests_list()
-    test_results = build_test_results(vp_report_data, d_report_data, m_report_data, sipp_report_data)
+    test_results = build_test_results(
+        vp_report_data, d_report_data, m_report_data, sipp_report_data, s_report_data
+    )
 
     align_test_results_with_test_list(test_results, tests_list)
 
