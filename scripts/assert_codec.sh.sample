@@ -1,0 +1,43 @@
+#!/bin/bash
+# Params: LABEL (required) — voip_patrol action label to look up
+#         EXPECTED_CODEC (optional) — if set, fail unless codec matches
+#                                     (case-insensitive; e.g. pcmu / PCMU)
+#
+# Post-stage: reads /output/$VP_RESULT_FILE via the baked-in volts-result CLI.
+# A label can match several legs (call_count > 1); this sample uses --first.
+# Contract: exit 0 = PASS; non-zero = FAIL (stderr becomes s_error text)
+set -u
+: "${LABEL:?param label is required}"
+EXPECTED_CODEC="${EXPECTED_CODEC:-}"
+
+if [[ "${STAGE:-}" != "post" ]]; then
+    echo "[${SCENARIO}][${STAGE}] check_codec is post-stage only (needs voip_patrol results)" >&2
+    exit 1
+fi
+
+echo "[${SCENARIO}][${STAGE}] codec check for label='${LABEL}'"
+
+set +e
+codec="$(volts-result vp --label "${LABEL}" --get codec --first)"
+rc=$?
+set -e
+
+if [[ "$rc" -eq 2 ]]; then
+    echo "[${SCENARIO}][${STAGE}] volts-result error looking up label='${LABEL}'" >&2
+    exit 1
+fi
+if [[ "$rc" -ne 0 || -z "${codec}" ]]; then
+    echo "[${SCENARIO}][${STAGE}] no codec for label='${LABEL}' (missing test or empty codec)" >&2
+    exit 1
+fi
+
+echo "[${SCENARIO}][${STAGE}] label='${LABEL}' codec=${codec}"
+
+if [[ -n "${EXPECTED_CODEC}" ]]; then
+    actual="$(printf '%s' "${codec}" | tr '[:upper:]' '[:lower:]')"
+    want="$(printf '%s' "${EXPECTED_CODEC}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "${actual}" != "${want}" ]]; then
+        echo "[${SCENARIO}][${STAGE}] codec mismatch: got ${codec}, want ${EXPECTED_CODEC}" >&2
+        exit 1
+    fi
+fi

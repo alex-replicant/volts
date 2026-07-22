@@ -158,6 +158,8 @@ SIPP JSONL does not carry Call-IDs.
 ## Samples (copy to activate)
 
 - [`ping_host.sh.sample`](ping_host.sh.sample) — bash ping with `HOST` / `COUNT`
+- [`assert_codec.sh.sample`](assert_codec.sh.sample) — post-stage: codec used by a
+  voip_patrol call with a given `LABEL` (optional `EXPECTED_CODEC` assert)
 - [`http_check.py.sample`](http_check.py.sample) — HTTP GET with optional
   `API_KEY`, Call-ID extraction via `volts_results`, and the test time window
 
