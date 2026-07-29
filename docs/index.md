@@ -20,7 +20,7 @@ So, call some destination(s) with one (or more) device(s) and control call arriv
 
 - **Database Integration**: VOLTS can integrate with your MySQL and/or PostgreSQL databases to write some data there before the test and remove it after
 - **Media Recording & Analysis**: Record and play media during calls and perform media checks of these files via [SoX](https://sox.sourceforge.net/) and [Chromaprint](https://acoustid.org/chromaprint)
-- **Custom Scripts**: Optional bash/python checks before/after a scenario (`./build.sh -s`) — see [Custom Scripts](#custom-scripts)
+- **Custom Scripts**: Bash/python checks before/after a scenario (built by default; runs only when declared) — see [Custom Scripts](#custom-scripts)
 - **TDD Support**: Use it in [Test-Driven Development](https://en.wikipedia.org/wiki/Test-driven-development) approach when adding functionalities to your existing PBX system. Test-Fail-Fix.
 
 ### System Architecture
@@ -57,25 +57,17 @@ To build, just run:
 ```
 {: .code}
 
-Script will build 7 `docker` images by default (8 with `-s` / `--with-scripts`).
+Script will build 8 `docker` images.
 
 #### Build Options
 
 | Option | Description |
 |--------|-------------|
-| `-c, --clean` | Stop and remove all VOLTS containers and images (including optional scripter) |
+| `-c, --clean` | Stop and remove all VOLTS containers and images |
 | `-r, --refresh` | Force rebuild all components (`--no-cache`) |
 | `-r, --refresh comp1[,comp2,...]` | Force rebuild specific component(s) (`--no-cache`) |
-| `-s, --with-scripts` | Include the optional scripter component |
 | `-p, --push` | Tag and push images to the registry |
 {: .table}
-
-```bash
-# Build including the optional scripter image
-./build.sh -s
-
-```
-{: .code}
 
 In case if `voip_patrol` or `sipp` is updated, you need to rebuild these containers:
 
@@ -315,7 +307,7 @@ sipp <target> -sf <scenario.xml> -m 1 -mp <random_port> -i <container_ip>
 ### Custom Scripts
 {: #custom-scripts .title.title--mini}
 
-Optional component for running bash or python checks before/after a scenario. Build once with `./build.sh -s`. Script sources live in the repo-root `scripts/` folder, mounted read-only into the container on every run — adding or editing a script needs no rebuild. Shipped samples are inert `*.sample` files (activate with `cp scripts/ping_host.sh.sample scripts/ping_host.sh`); user scripts are gitignored so `git pull` / `docker pull` never touch them. The image ships `curl`, `jq`, `ping`, `dig`, python `requests` and the `volts_results` / `volts-result` result-query helpers (`post` scripts can read e.g. SIP Call-IDs: `volts-result vp --get callid`; a label matching several call legs returns all of them, `--first`/`--last` pick one); optional extra pip deps go in local `scripts/requirements.txt` and are installed at runtime into `tmp/scripter-deps` (no image rebuild). Full developer guide: [`scripts/README.md`](https://github.com/igorolhovskiy/volts/blob/main/scripts/README.md).
+Built by default with `./build.sh`. Scripts run only when a scenario declares a `<section type="script">`. Script sources live in the repo-root `scripts/` folder, mounted read-only into the container on every run — adding or editing a script needs no rebuild. Shipped samples are inert `*.sample` files (activate with `cp scripts/ping_host.sh.sample scripts/ping_host.sh`); user scripts are gitignored so `git pull` / `docker pull` never touch them. The image ships `curl`, `jq`, `ping`, `dig`, python `requests` and the `volts_results` / `volts-result` result-query helpers (`post` scripts can read e.g. SIP Call-IDs: `volts-result vp --get callid`; a label matching several call legs returns all of them, `--first`/`--last` pick one); optional extra pip deps go in local `scripts/requirements.txt` and are installed at runtime into `tmp/scripter-deps` (no image rebuild). Full developer guide: [`scripts/README.md`](https://github.com/igorolhovskiy/volts/blob/main/scripts/README.md).
 
 | Attribute | Default | Description |
 |-----------|---------|-------------|

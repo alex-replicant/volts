@@ -173,11 +173,11 @@ run_script() {
         return
     fi
 
-    # Scenario declares scripts but optional image is absent: report via the
+    # Scenario declares scripts but image is absent: report via the
     # standard JSONL channel AND stdout instead of silently skipping
     if ! docker image inspect "${S_IMAGE}" > /dev/null 2>&1; then
-        echo "[ERROR] ${CURRENT_SCENARIO}: script section present but scripter image missing, build with ./build.sh -s"
-        script_fail_line "${1}" "scripter image missing, build with ./build.sh -s"
+        echo "[ERROR] ${CURRENT_SCENARIO}: script section present but scripter image missing, run ./build.sh to build it"
+        script_fail_line "${1}" "scripter image missing, run ./build.sh to build it"
         return
     fi
 
@@ -598,7 +598,9 @@ SIPP_CONTAINER_NAME=volts_sipp
 SIPP_IMAGE=${IMAGE_PREFIX}volts_sipp:latest
 SIPP_RESULT_FILE="sipp.jsonl"
 
-# scripter (optional component — not in COMPONENTS / check_images)
+# scripter — built by default with ./build.sh, but intentionally left out of
+# check_images so a run with zero script scenarios still works against image
+# sets that do not yet include volts_scripter (e.g. Hub pulls before publish).
 S_IMAGE=${IMAGE_PREFIX}volts_scripter:latest
 S_CONTAINER_NAME=volts_scripter
 SCRIPT_RESULT_FILE="script.jsonl"

@@ -23,7 +23,7 @@ The suite consists of 10 parts, that are running sequentially
 2. Start of a `Websocket-TLS` proxy to provide possibility of use WSS transport for the `voip_patrol` scenarios.
 ---
 3. Running database scripts. Usually - put some data inside some routing or subscriber data.
-4. Running custom scripts (`stage=pre`), if the optional scripter component is built and the scenario declares them.
+4. Running custom scripts (`stage=pre`), if the scenario declares them.
 5. Running `voip_patrol` or `sipp` scenario.
 6. Again running database scripts. Usually - remove data that had been put at stage 3.
 7. Run `media_check` if necessary to analyse obtained media files.
@@ -38,7 +38,7 @@ Steps 3-8 are running sequentially against scenarios files prepared in step 1. O
 You can build images locally or pull existing from a `dockerhub`.</br>
 Suite is designed to run locally from your Linux PC or Mac. And of course, `docker` should be installed. It's up to you.</br>
 *Notes on using `podman`: I was able to run VOTLS using `podman-docker` package. One obstacle by default - the volumes permissions inside a container. To address this issue please refer to [this article](https://www.redhat.com/en/blog/container-permission-denied-errors).*</br>
-To build, just run `./build.sh`. Script will build 7 `docker` images by default (8 with `-s` / `--with-scripts`).</br>
+To build, just run `./build.sh`. Script will build 8 `docker` images.</br>
 In a case if `voip_patrol` or `sipp` is updated, you need to rebuild these containers again, you can do it with `./build.sh -r <component>`, refer to `./build.sh --help`.
 
 ### Build Options
@@ -49,19 +49,15 @@ In a case if `voip_patrol` or `sipp` is updated, you need to rebuild these conta
 
 | Option | Description |
 | --- | --- |
-| `-c, --clean` | Stop and remove all VOLTS containers and images (including optional scripter) |
+| `-c, --clean` | Stop and remove all VOLTS containers and images |
 | `-r, --refresh` | Force rebuild all components (`--no-cache`) |
 | `-r, --refresh comp1[,comp2,...]` | Force rebuild specific component(s) (`--no-cache`) |
-| `-s, --with-scripts` | Include the optional scripter component |
 | `-p, --push` | Tag and push images to the registry. Change the `REGISTRY` variable in a script accordingly |
 
 #### Examples
 ```sh
 # Build all components
 ./build.sh
-
-# Build including the optional scripter image
-./build.sh -s
 
 # Force rebuild all components from scratch
 ./build.sh --refresh
@@ -291,7 +287,7 @@ sipp <target> -sf <scenario.xml> -m 1 -mp <random_port> -i <container_ip>
 
 #### Custom scripts
 
-Optional component. Build once with `./build.sh -s`. Your `.sh` / `.py` files live in the repo-root [`scripts/`](scripts/) folder, which is **mounted read-only** into the container on every run — adding or editing a script needs no rebuild. Shipped samples are inert `*.sample` files; activate with `cp scripts/ping_host.sh.sample scripts/ping_host.sh`. User scripts are gitignored, so `git pull` / `docker pull` never touch them. The image is batteries-included (`curl`, `jq`, `ping`, `dig`, python `requests`, plus the `volts_results` / `volts-result` result-query helpers); optional extra pip deps go in local `scripts/requirements.txt` and are installed at runtime into `tmp/scripter-deps` (no image rebuild — see the guide). Full developer guide: [`scripts/README.md`](scripts/README.md).
+Built by default with `./build.sh`. Scripts run only when a scenario declares a `<section type="script">`. Your `.sh` / `.py` files live in the repo-root [`scripts/`](scripts/) folder, which is **mounted read-only** into the container on every run — adding or editing a script needs no rebuild. Shipped samples are inert `*.sample` files; activate with `cp scripts/ping_host.sh.sample scripts/ping_host.sh`. User scripts are gitignored, so `git pull` / `docker pull` never touch them. The image is batteries-included (`curl`, `jq`, `ping`, `dig`, python `requests`, plus the `volts_results` / `volts-result` result-query helpers); optional extra pip deps go in local `scripts/requirements.txt` and are installed at runtime into `tmp/scripter-deps` (no image rebuild — see the guide). Full developer guide: [`scripts/README.md`](scripts/README.md).
 
 | Attribute | Default | Description |
 | --- | --- | --- |

@@ -1,6 +1,6 @@
 # Custom scripts developer guide
 
-Scripts in this directory are **mounted read-only** into the optional
+Scripts in this directory are **mounted read-only** into the
 `volts_scripter` container at `/scripts` on every run — they are NOT baked
 into the image. Add or edit a `.sh` / `.py` file here and just re-run
 `./run.sh`; no rebuild needed. The scripter container uses `--net=host`
@@ -16,7 +16,8 @@ Your scripts are **local-only**: everything in this directory except
 `docker pull` can never overwrite or delete them.
 (Careful: `git clean -xdf` removes ignored files, including your scripts.)
 
-To use the script feature, build the optional image once: `./build.sh -s`.
+The scripter image is built by default with `./build.sh`. Scripts run only
+when a scenario declares a `<section type="script">`.
 
 ## What's in the image (no rebuild needed)
 
