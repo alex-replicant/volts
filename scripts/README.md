@@ -122,7 +122,9 @@ shared `tmp/output` volume).
 
 `pre` and `post` are independent — there is no cleanup inversion like the
 database section. A failed `pre` script fails the scenario in the report, but
-`run.sh` still continues into voip/sipp/media/`post`.
+`run.sh` still continues into voip/sipp/media/`post`. The report table adds a
+**Script** column only when at least one scenario in the run executed script
+actions; runs without scripts keep the original columns.
 
 ## Reading real-time data (Call-IDs and friends)
 

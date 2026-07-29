@@ -647,31 +647,39 @@ Additional variables for advanced users:
 
 ## Results
 
-Rebuilding the report image always adds a **Script** column (`N/A` when the scenario has no script section).
-
 As a result, you will have a table like this.
 ```
-+---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+--------+------------------+
-|                              Scenario |                                               VoIP Patrol | SIPP | Database | Media | Script | Status |             Text |
-+---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+--------+------------------+
-|                           01-register |                                                      PASS |  N/A |      N/A |   N/A |    N/A |   PASS |  Scenario passed |
-|                                       |                                      Register 88881       |      |          |       |        |   PASS | Main test passed |
-|                          02-call-echo |                                                      PASS |  N/A |      N/A |   N/A |    N/A |   PASS |  Scenario passed |
-|                                       |                                      Call to 11111 (echo) |      |          |       |        |   PASS | Main test passed |
++---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+------------------+
+|                              Scenario |                                               VoIP Patrol | SIPP | Database | Media | Status |             Text |
++---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+------------------+
+|                           01-register |                                                      PASS |  N/A |      N/A |   N/A |   PASS |  Scenario passed |
+|                                       |                                      Register 88881       |      |          |       |   PASS | Main test passed |
+|                          02-call-echo |                                                      PASS |  N/A |      N/A |   N/A |   PASS |  Scenario passed |
+|                                       |                                      Call to 11111 (echo) |      |          |       |   PASS | Main test passed |
 
 ....
-|            51-call-echo-media-control |                                                      PASS |  N/A |      N/A |  PASS |    N/A |   PASS |  Scenario passed |
-|                                       |                                      Call to 11111 (echo) |      |          |       |        |   PASS | Main test passed |
-| 52-delayed-call-forward-unconditional |                                                      PASS |  N/A |     PASS |   N/A |    N/A |   PASS |  Scenario passed |
-|                                       |                                      Register 90012       |      |          |       |        |   PASS | Main test passed |
-|                                       |                                      Register 90013       |      |          |       |        |   PASS | Main test passed |
-|                                       |                      Receive call on 90012 and not answer |      |          |       |        |   PASS |    Call canceled |
-|                                       |   Call from 90011 to 90012 (delay forward 25 sec) ->90013 |      |          |       |        |   PASS | Main test passed |
-|                                       |                       Receive call on 90013       finally |      |          |       |        |   PASS | Main test passed |
-|                53-server-check-health |                                                       N/A | PASS |      N/A |   N/A |    N/A |   PASS | SIPP test passed |
-+---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+--------+------------------+
+|            51-call-echo-media-control |                                                      PASS |  N/A |      N/A |  PASS |   PASS |  Scenario passed |
+|                                       |                                      Call to 11111 (echo) |      |          |       |   PASS | Main test passed |
+| 52-delayed-call-forward-unconditional |                                                      PASS |  N/A |     PASS |   N/A |   PASS |  Scenario passed |
+|                                       |                                      Register 90012       |      |          |       |   PASS | Main test passed |
+|                                       |                                      Register 90013       |      |          |       |   PASS | Main test passed |
+|                                       |                      Receive call on 90012 and not answer |      |          |       |   PASS |    Call canceled |
+|                                       |   Call from 90011 to 90012 (delay forward 25 sec) ->90013 |      |          |       |   PASS | Main test passed |
+|                                       |                       Receive call on 90013       finally |      |          |       |   PASS | Main test passed |
+|                53-server-check-health |                                                       N/A | PASS |      N/A |   N/A |   PASS | SIPP test passed |
++---------------------------------------+-----------------------------------------------------------+------+----------+-------+--------+------------------+
 
 Scenarios ['49-teams-follow-forward', '50-team-no-answer-forward'] are failed!
+```
+
+A **Script** column is added only when at least one scenario in the run executed custom script actions (`N/A` for scenarios in that run without a script section); runs without scripts keep the original table above.
+```
++----------------------+-------------+------+----------+-------+--------+--------+------------------+
+|             Scenario | VoIP Patrol | SIPP | Database | Media | Script | Status |             Text |
++----------------------+-------------+------+----------+-------+--------+--------+------------------+
+| 60-call-with-scripts |        PASS |  N/A |      N/A |   N/A |   PASS |   PASS |  Scenario passed |
+|         02-call-echo |        PASS |  N/A |      N/A |   N/A |    N/A |   PASS |  Scenario passed |
++----------------------+-------------+------+----------+-------+--------+--------+------------------+
 ```
 That means your system is not OK, or something need to be tuned with the tests.</br>
 Not really much to describe here, just read info on the console

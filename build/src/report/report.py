@@ -445,34 +445,51 @@ def filter_results_default(test_results):
     return status, printed_results
 
 
-def print_table(print_results):
+def has_script_results(test_results):
+    '''
+    True if at least one scenario in this run produced script results.
+    Must be computed from the full test_results: filter_results_default drops
+    PASS s_status entries, so filtered dicts would hide an all-PASS script run.
+    '''
+    return any("s_status" in details for details in test_results.values())
+
+
+def print_table(print_results, show_script=False):
     tbl = PrettyTable()
 
-    tbl.field_names = ["Scenario", "VoIP Patrol", "SIPP", "Database", "Media", "Script", "Status", "Text"]
+    field_names = ["Scenario", "VoIP Patrol", "SIPP", "Database", "Media", "Status", "Text"]
+    if show_script:
+        field_names.insert(5, "Script")
+    tbl.field_names = field_names
 
     for scenario_name, scenario_details in print_results.items():
         vp_status_text = scenario_details.get("vp_status", "N/A")
         db_status_text = scenario_details.get("d_status", "N/A")
         m_status_text = scenario_details.get("m_status", "N/A")
         sipp_status_text = scenario_details.get("sipp_status", "N/A")
-        s_status_text = scenario_details.get("s_status", "N/A")
 
         # Getting overall status:
         combined_status = scenario_details.get("status", "N/A")
 
-        tbl.add_row([
+        scenario_row = [
             scenario_name, vp_status_text, sipp_status_text, db_status_text,
-            m_status_text, s_status_text, combined_status, scenario_details.get("status_text"),
-        ])
+            m_status_text, combined_status, scenario_details.get("status_text"),
+        ]
+        if show_script:
+            scenario_row.insert(5, scenario_details.get("s_status", "N/A"))
+        tbl.add_row(scenario_row)
 
         if not (type(scenario_details.get("tests")) is dict):
             continue
 
         for test_data in scenario_details.get("tests").values():
-            tbl.add_row([
-                "", test_data.get("label"), "", "", "", "",
+            test_row = [
+                "", test_data.get("label"), "", "", "",
                 test_data.get("result"), test_data.get("result_text"),
-            ])
+            ]
+            if show_script:
+                test_row.insert(5, "")
+            tbl.add_row(test_row)
 
     tbl.align = "r"
     print(tbl)
@@ -516,7 +533,7 @@ def print_results_table_default(test_results):
 
     if failed_scenarios is not None:
         print_failed_scenarios_details(failed_scenarios, test_results)
-        print_table(printed_results)
+        print_table(printed_results, show_script=has_script_results(test_results))
         print(f"Scenarios {", ".join(failed_scenarios)} are failed!")
 
         return
@@ -546,7 +563,7 @@ def print_results_table_full(test_results):
     if failed_scenarios is not None:
         print_failed_scenarios_details(failed_scenarios, test_results)
 
-    print_table(test_results)
+    print_table(test_results, show_script=has_script_results(test_results))
 
     if failed_scenarios is not None:
         print(f"Scenarios {", ".join(failed_scenarios)} are failed!")
