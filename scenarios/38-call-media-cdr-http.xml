@@ -1,0 +1,60 @@
+<!--
+Didactic example: place a call, check the media sample, then in post query a
+CDR API using the SIP Call-ID (voip_patrol.jsonl field "callid") as input.
+
+Requires activating the sample script first:
+  cp scripts/http_check.py.sample scripts/http_check.py
+
+Replace the placeholder URL (and optional api_key) with a real CDR endpoint,
+or expect the Script stage to FAIL.
+
+Flow: voip_patrol → media_check → post http_check.py reads callid via
+vp_tests() → GET url?call_id=...&from=TEST_START_TIME&to=TEST_END_TIME
+→ script.jsonl. Never print API keys (failure tails land in the report).
+Run: ./run.sh 38-call-media-cdr-http   or   ./run.sh tag=script
+-->
+<config tag="script">
+    <section type="voip_patrol">
+        <actions>
+            <action type="codec" disable="all"/>
+            <action type="codec" enable="pcma" priority="250"/>
+            <action type="codec" enable="pcmu" priority="249"/>
+            <action type="call" label="outgoing call"
+                transport="{{ a.88881.transport }}"
+                expected_cause_code="200"
+                caller="{{ a.88881.label }}@{{ c.domain }}"
+                callee="11111@{{ a.88881.domain }}"
+                from="sip:{{ a.88881.label }}@{{ c.domain }}"
+                to_uri="11111@{{ c.domain }}"
+                max_duration="20" hangup="10"
+                auth_username="{{ a.88881.username }}"
+                password="{{ a.88881.password }}"
+                realm="{{ c.domain }}"
+                play="{{ c.play_file }}"
+                rtp_stats="true"
+                srtp="{{ a.88881.srtp }}"
+                record="/output/{{ scenario_name }}.wav"
+            />
+            <action type="wait" complete="true" ms="30000"/>
+        </actions>
+    </section>
+    <section type="media_check">
+        <actions>
+            <action type="sox"
+                sox_filter="length s -ge 10; length s -le 11"
+                file="/output/{{ scenario_name }}.wav"
+            />
+        </actions>
+    </section>
+    <section type="script">
+        <actions>
+            <action script="http_check.py" label="CDR landed in billing API" stage="post"
+                    timeout="30">
+                <!-- Placeholder: replace with your CDR API or expect Script FAIL -->
+                <param name="url" value="https://api.example.com/cdr"/>
+                <param name="expected_status" value="200"/>
+                <!-- optional: <param name="api_key" value="{{ c.api_key }}"/> -->
+            </action>
+        </actions>
+    </section>
+</config>

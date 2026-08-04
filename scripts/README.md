@@ -166,6 +166,17 @@ SIPP JSONL does not carry Call-IDs.
 - [`http_check.py.sample`](http_check.py.sample) — HTTP GET with optional
   `API_KEY`, Call-ID extraction via `volts_results`, and the test time window
 
+Each sample header embeds a minimal XML wiring example (params → env → JSONL →
+`script.jsonl`). End-to-end demos live under `scenarios/`:
+
+| Scenario | Activate | Notes |
+| --- | --- | --- |
+| [`37-call-codec-priority-assert.xml`](../scenarios/37-call-codec-priority-assert.xml) | `cp scripts/assert_codec.sh.sample scripts/assert_codec.sh` | Offers pcma@250 + pcmu@249; asserts remote chose last-priority `pcmu` (needs a PCMU-locked peer) |
+| [`38-call-media-cdr-http.xml`](../scenarios/38-call-media-cdr-http.xml) | `cp scripts/http_check.py.sample scripts/http_check.py` | Call + media sox, then CDR HTTP check by SIP Call-ID (`callid`); replace the placeholder URL |
+
+Run individually (`./run.sh 37-call-codec-priority-assert`) or via `./run.sh tag=script`.
+Without the `cp` step (and matching remote/API), the Script stage FAILs.
+
 ## Escaping notes
 
 - Literals typed in the scenario XML must XML-escape `< & "`

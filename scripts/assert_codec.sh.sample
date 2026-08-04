@@ -6,6 +6,8 @@
 # Post-stage: reads /output/$VP_RESULT_FILE via the baked-in volts-result CLI.
 # A label can match several legs (call_count > 1); this sample uses --first.
 # Contract: exit 0 = PASS; non-zero = FAIL (stderr becomes s_error text)
+# End-to-end demo: scenarios/37-call-codec-priority-assert.xml
+
 set -u
 : "${LABEL:?param label is required}"
 EXPECTED_CODEC="${EXPECTED_CODEC:-}"

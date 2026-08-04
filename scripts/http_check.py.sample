@@ -9,7 +9,11 @@ so real-time data like SIP Call-IDs can be read via the baked-in volts_results
 helper (a test label can match several legs when call_count > 1 - you get all).
 
 IMPORTANT: never print params or VOLTS_PARAMS_JSON - on failure, stderr/stdout
-ends up in script.jsonl and the final report (secret leak)."""
+ends up in script.jsonl and the final report (secret leak).
+
+End-to-end demo: scenarios/38-call-media-cdr-http.xml"""
+
+
 import os
 import sys
 

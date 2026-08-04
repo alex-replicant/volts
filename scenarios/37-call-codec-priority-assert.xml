@@ -1,0 +1,59 @@
+<!--
+Didactic example: offer two codecs (pcma preferred @250, pcmu @249) and assert
+that the remote answered with the last-priority codec (pcmu) — hypothetically
+the peer is locked to PCMU.
+
+Requires activating the sample script first:
+  cp scripts/assert_codec.sh.sample scripts/assert_codec.sh
+
+Will FAIL unless (1) that script exists under scripts/ and (2) the remote
+negotiates PCMU (not first-choice PCMA).
+
+Flow: voip_patrol → media_check → post script reads voip_patrol.jsonl via
+volts-result (field "codec" for label "outgoing call") → script.jsonl.
+Run: ./run.sh 37-call-codec-priority-assert   or   ./run.sh tag=script
+-->
+<config tag="script">
+    <section type="voip_patrol">
+        <actions>
+            <action type="codec" disable="all"/>
+            <action type="codec" enable="pcma" priority="250"/>
+            <action type="codec" enable="pcmu" priority="249"/>
+            <action type="call" label="outgoing call"
+                transport="{{ a.88881.transport }}"
+                expected_cause_code="200"
+                caller="{{ a.88881.label }}@{{ c.domain }}"
+                callee="11111@{{ a.88881.domain }}"
+                from="sip:{{ a.88881.label }}@{{ c.domain }}"
+                to_uri="11111@{{ c.domain }}"
+                max_duration="20" hangup="10"
+                auth_username="{{ a.88881.username }}"
+                password="{{ a.88881.password }}"
+                realm="{{ c.domain }}"
+                play="{{ c.play_file }}"
+                rtp_stats="true"
+                srtp="{{ a.88881.srtp }}"
+                record="/output/{{ scenario_name }}.wav"
+            />
+            <action type="wait" complete="true" ms="30000"/>
+        </actions>
+    </section>
+    <section type="media_check">
+        <actions>
+            <action type="sox"
+                sox_filter="length s -ge 10; length s -le 11"
+                file="/output/{{ scenario_name }}.wav"
+            />
+        </actions>
+    </section>
+    <section type="script">
+        <actions>
+            <!-- LABEL must exactly match the voip_patrol call label above -->
+            <action script="assert_codec.sh" label="assert remote chose last-priority codec"
+                    stage="post">
+                <param name="label" value="outgoing call"/>
+                <param name="expected_codec" value="pcmu"/>
+            </action>
+        </actions>
+    </section>
+</config>
